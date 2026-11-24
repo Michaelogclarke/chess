@@ -4,8 +4,7 @@
   "description": "Play chess online with a friend via a shared link",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "test": "node --test test/"
+    "start": "node server.js"
   },
   "repository": {
     "type": "git",
