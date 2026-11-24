@@ -5,6 +5,8 @@ Play chess online in the browser. Join an open game from the lobby, post your ow
 - **Open games lobby:** the home page shows a live list of public games waiting for an opponent. Click Join to play. A game drops off the list once someone joins, or if its creator closes the page.
 - **Public or private:** public games are listed in the lobby; private games can only be joined with the link.
 - **Nicknames:** pick a display name (or roll a random one). It's remembered in your browser. No accounts or passwords.
+- **Move review:** step through the game with ⏮ ◀ ▶ ⏭, the arrow keys, or by clicking a move. Works during a game too; touch the board or press "Back to the game" to return.
+- **Stockfish game review:** after a game ends, Stockfish analyses every move. You get each player's accuracy, inaccuracies (?!), mistakes (?) and blunders (??), an evaluation graph and bar, and an arrow showing the engine's best move. It runs in your browser, so it costs the server nothing, and it's locked during play so nobody can use it to cheat.
 
 - Moves sync live over WebSockets, and the server checks every move with [chess.js](https://github.com/jhlywa/chess.js), so nobody can cheat by editing their browser.
 - Optional clocks (3+2, 5+0, 10+0, 15+10, 30+0, or custom), run by the server.
@@ -56,6 +58,8 @@ Run `npm start` on your computer, then in another terminal run `npx localtunnel 
 | `server.js` | Express + Socket.IO server. Creates games, gives out seats, validates moves, runs clocks, and ends games. |
 | `public/index.html` | Lobby: nickname, live list of open games, and the create-game form. |
 | `public/game.html`, `public/app.js` | Game page: draws the board, handles input, shows clocks, move list and buttons. |
+| `public/review.js` | Game review maths: replays moves, grades each one, works out accuracy. |
+| `public/engine.js` | Runs Stockfish in a Web Worker and talks to it. |
 | `public/style.css` | Styles. |
 | `public/pieces/` | SVG piece images. |
 | `render.yaml` | Render deployment settings. |
@@ -65,3 +69,5 @@ Each player gets a secret seat token, saved in their browser. It's how the serve
 ## Credits
 
 Piece images are the "cburnett" set by [Colin M.L. Burnett](https://en.wikipedia.org/wiki/User:Cburnett), the same set Lichess uses. They're licensed under GPLv2+ (also available under BSD and GFDL on [Wikimedia Commons](https://commons.wikimedia.org/wiki/Category:SVG_chess_pieces)).
+
+The review engine is [Stockfish](https://stockfishchess.org) 19 via [stockfish.js](https://github.com/nmrugg/stockfish.js) (the "lite, single-threaded" WASM build), licensed under GPLv3. Move grading and the accuracy formula follow [Lichess's published approach](https://lichess.org/page/accuracy).

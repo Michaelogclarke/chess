@@ -21,6 +21,15 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Serve chess.js to the browser so the client can show legal-move hints.
 app.get('/vendor/chess.js', (req, res) =>
   res.sendFile(require.resolve('chess.js/dist/esm/chess.js')));
+// Stockfish (WASM build, single-threaded "lite") for after-game review. It runs
+// in the player's browser, so analysis costs the server nothing.
+const STOCKFISH_FILES = new Set(['stockfish-19-lite-single.js', 'stockfish-19-lite-single.wasm']);
+const stockfishDir = path.join(path.dirname(require.resolve('stockfish/package.json')), 'bin');
+app.get('/vendor/stockfish/:file', (req, res, next) => {
+  if (!STOCKFISH_FILES.has(req.params.file)) return next();
+  res.set('Cache-Control', 'public, max-age=604800');
+  res.sendFile(path.join(stockfishDir, req.params.file));
+});
 
 /** @type {Map<string, any>} */
 const games = new Map();

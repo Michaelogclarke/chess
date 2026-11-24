@@ -1,6 +1,9 @@
 // Game page client. The server is the source of truth; this file draws the
 // board, handles clicks/drags, and sends move requests.
 import { Chess } from '/vendor/chess.js';
+import {
+  buildPositions, analysePositions, classifyMoves, summary, winPct, formatEval, LABELS,
+} from '/review.js';
 
 const gameId = location.pathname.split('/').pop();
 const tokenKey = 'chess-token-' + gameId;
@@ -35,6 +38,15 @@ let selected = null; // square like 'e2'
 let receivedAt = 0;
 let rematchDismissed = false;
 
+// Move review: positions[i] is the board after i moves. viewPly null = live.
+let positions = buildPositions([]);
+let positionsKey = '';
+let viewPly = null;
+// Stockfish review: { evals, grades, done } once started.
+let review = null;
+let engine = null;
+const REVIEW_DEPTH = 16;
+
 // ---------- networking ----------
 const socket = io();
 // Nickname from the lobby; people arriving straight from a link get a random one.
@@ -63,8 +75,20 @@ socket.on('state', (s) => {
   chess = new Chess(s.fen);
   if (s.status !== 'over') rematchDismissed = false;
   if (s.moves.length !== prevMoves) selected = null;
+  syncPositions();
+  if (s.status === 'over' && !review) loadCachedReview();
   render();
 });
+
+function syncPositions() {
+  const key = state.moves.join(' ');
+  if (key === positionsKey) return;
+  // A new game (rematch) or a correction from the server: drop history view and review.
+  if (!key.startsWith(positionsKey)) { viewPly = null; stopReview(); review = null; }
+  positionsKey = key;
+  positions = buildPositions(state.moves);
+  if (viewPly !== null && viewPly >= positions.length - 1) viewPly = null;
+}
 socket.on('error-msg', (msg) => {
   $('status').textContent = msg;
   boardEl.innerHTML = '';
@@ -91,13 +115,19 @@ function canMove() {
   return state && state.status === 'playing' && myColor && state.turn === myColor;
 }
 
+const shownPly = () => (viewPly === null ? positions.length - 1 : viewPly);
+
 function render() {
   if (!state) return;
+  const live = viewPly === null;
+  const shown = live ? chess : new Chess(positions[viewPly].fen);
+  const lastMove = live ? state.lastMove : positions[viewPly].move;
   const targets = new Set(
-    selected ? chess.moves({ square: selected, verbose: true }).map((m) => m.to) : []);
-  const kingInCheck = state.inCheck
-    ? chess.board().flat().find((p) => p && p.type === 'k' && p.color === state.turn)?.square
+    live && selected ? chess.moves({ square: selected, verbose: true }).map((m) => m.to) : []);
+  const kingInCheck = shown.inCheck()
+    ? shown.board().flat().find((p) => p && p.type === 'k' && p.color === shown.turn())?.square
     : null;
+  boardEl.classList.toggle('history', !live);
 
   const squares = squaresInOrder();
   boardEl.innerHTML = '';
@@ -106,11 +136,11 @@ function render() {
     const dark = ('abcdefgh'.indexOf(sq[0]) + Number(sq[1])) % 2 === 0;
     el.className = 'sq ' + (dark ? 'dark' : 'light');
     el.dataset.sq = sq;
-    if (state.lastMove && (sq === state.lastMove.from || sq === state.lastMove.to)) el.classList.add('last');
-    if (sq === selected) el.classList.add('sel');
+    if (lastMove && (sq === lastMove.from || sq === lastMove.to)) el.classList.add('last');
+    if (live && sq === selected) el.classList.add('sel');
     if (sq === kingInCheck) el.classList.add('check');
 
-    const piece = chess.get(sq);
+    const piece = shown.get(sq);
     if (piece) {
       const p = document.createElement('span');
       p.className = 'pc';
@@ -127,6 +157,7 @@ function render() {
 
   renderPanel();
   renderClocks();
+  renderReview();
 }
 
 function renderPanel() {
@@ -189,16 +220,44 @@ function renderPanel() {
   $('rematch').disabled = state.rematchOffer === myColor;
   $('rematch').textContent = state.rematchOffer === myColor ? 'Rematch requested…' : 'Rematch';
 
-  // Move list.
+  renderMoveList();
+}
+
+function renderMoveList() {
   const moves = $('moves');
+  const current = shownPly();
+  const grades = review?.grades || [];
   moves.innerHTML = '';
   for (let i = 0; i < state.moves.length; i += 2) {
     const li = document.createElement('li');
-    li.innerHTML = `<span>${state.moves[i]}</span><span>${state.moves[i + 1] || ''}</span>`;
+    for (const ply of [i + 1, i + 2]) {
+      const san = state.moves[ply - 1];
+      if (!san) { li.appendChild(document.createElement('span')); continue; }
+      const b = document.createElement('button');
+      b.className = 'mv';
+      b.dataset.ply = ply;
+      const g = grades[ply];
+      b.textContent = san + (g ? LABELS[g.label].symbol : '');
+      if (g && g.label !== 'good') b.classList.add(g.label);
+      if (ply === current && (viewPly !== null || review)) b.classList.add('current');
+      li.appendChild(b);
+    }
     moves.appendChild(li);
   }
   moves.parentElement.hidden = state.moves.length === 0;
-  moves.scrollTop = moves.scrollHeight;
+
+  const cur = moves.querySelector('.current');
+  if (cur) cur.scrollIntoView({ block: 'nearest' });
+  else if (viewPly === null) moves.scrollTop = moves.scrollHeight;
+
+  const total = positions.length - 1;
+  $('nav-pos').textContent = viewPly === null ? (total ? `Move ${total}` : '') : `${viewPly} / ${total}`;
+  $('nav-first').disabled = $('nav-prev').disabled = current === 0;
+  $('nav-next').disabled = $('nav-last').disabled = viewPly === null;
+  $('nav-live').hidden = !(viewPly !== null && state.status === 'playing');
+  $('nav-live').classList.toggle('urgent', state.status === 'playing' && myColor === state.turn);
+  $('nav-live').textContent = myColor === state.turn && state.status === 'playing'
+    ? "It's your move — back to the game ▸" : 'Back to the game ▸';
 }
 
 function fmt(ms) {
@@ -237,7 +296,9 @@ const ownPiece = (sq) => { const p = chess.get(sq); return p && p.color === myCo
 let drag = null; // { from, ghost, moved, wasSelected }
 
 boardEl.addEventListener('pointerdown', (e) => {
-  if (!canMove() || !promoEl.hidden) return;
+  // Looking at an old position: touching the board jumps back to the game.
+  if (viewPly !== null && state?.status === 'playing') { goTo(null); return; }
+  if (viewPly !== null || !canMove() || !promoEl.hidden) return;
   const sq = squareAt(e.clientX, e.clientY);
   if (!sq) return;
 
@@ -301,8 +362,9 @@ function tryMove(from, to) {
 function sendMove(from, to, promotion) {
   // Show the move straight away; the server's reply confirms or corrects it.
   try {
-    chess.move({ from, to, promotion });
-    state = { ...state, lastMove: { from, to }, turn: chess.turn(), inCheck: chess.inCheck() };
+    const m = chess.move({ from, to, promotion });
+    state = { ...state, moves: [...state.moves, m.san], lastMove: { from, to }, turn: chess.turn(), inCheck: chess.inCheck() };
+    syncPositions();
   } catch {}
   selected = null;
   render();
@@ -344,3 +406,225 @@ $('copy').onclick = async () => {
   $('copy').textContent = 'Copied!';
   setTimeout(() => ($('copy').textContent = 'Copy'), 1500);
 };
+
+// ---------- move navigation ----------
+function goTo(ply) {
+  const last = positions.length - 1;
+  if (ply !== null) ply = Math.max(0, Math.min(last, ply));
+  // Reaching the latest position means "live" again.
+  viewPly = ply === null || ply >= last ? null : ply;
+  selected = null;
+  render();
+}
+$('nav-first').onclick = () => goTo(0);
+$('nav-prev').onclick = () => goTo(shownPly() - 1);
+$('nav-next').onclick = () => goTo(shownPly() + 1);
+$('nav-last').onclick = () => goTo(null);
+$('nav-live').onclick = () => goTo(null);
+$('moves').addEventListener('click', (e) => {
+  const b = e.target.closest('.mv');
+  if (b) goTo(Number(b.dataset.ply));
+});
+document.addEventListener('keydown', (e) => {
+  if (!state || e.target.closest('input, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
+  const keys = {
+    ArrowLeft: () => goTo(shownPly() - 1),
+    ArrowRight: () => goTo(shownPly() + 1),
+    ArrowUp: () => goTo(0),
+    Home: () => goTo(0),
+    ArrowDown: () => goTo(null),
+    End: () => goTo(null),
+  };
+  if (keys[e.key]) { e.preventDefault(); keys[e.key](); }
+});
+
+// ---------- Stockfish game review ----------
+// Only offered once the game is over, so nobody can use the engine mid-game.
+const reviewKey = () => `chess-review-${gameId}-${positionsKey}`;
+
+function loadCachedReview() {
+  try {
+    const evals = JSON.parse(sessionStorage.getItem(reviewKey()) || 'null');
+    if (evals && evals.length === positions.length) {
+      review = { evals, grades: classifyMoves(positions, evals), done: true };
+    }
+  } catch {}
+}
+
+function stopReview() {
+  if (engine) { engine.terminate(); engine = null; }
+}
+
+async function startReview() {
+  if (review || state.status !== 'over') return;
+  const key = positionsKey;
+  review = { evals: [], grades: [null], done: false, progress: 0 };
+  render();
+  try {
+    const { Engine } = await import('/engine.js');
+    engine = new Engine();
+    await engine.ready;
+    const evals = await analysePositions(positions, engine, {
+      depth: REVIEW_DEPTH,
+      onProgress: (n, total, evs) => {
+        if (positionsKey !== key) throw new Error('stale');
+        review.evals = evs.slice();
+        review.grades = classifyMoves(positions, review.evals);
+        review.progress = n / total;
+        render();
+      },
+    });
+    review.done = true;
+    try { sessionStorage.setItem(reviewKey(), JSON.stringify(evals)); } catch {}
+  } catch (err) {
+    if (positionsKey === key) review = { error: 'Could not run Stockfish in this browser: ' + err.message };
+  } finally {
+    stopReview();
+    render();
+  }
+}
+$('review-start').onclick = startReview;
+
+function renderReview() {
+  const over = state.status === 'over' && state.moves.length > 0;
+  $('review').hidden = !over;
+  const ply = shownPly();
+  const ev = review?.evals?.[ply];
+  renderEvalBar(over ? ev : null);
+  renderArrow(over && review ? ev : null);
+  if (!over) return;
+
+  $('review-start').hidden = !!review;
+  const running = review && !review.done && !review.error;
+  $('review-progress').hidden = !running;
+  if (running) {
+    $('review-progress').querySelector('.bar').style.width = Math.round(review.progress * 100) + '%';
+    $('review-progress').querySelector('span').textContent =
+      `Stockfish is analysing… ${Math.round(review.progress * 100)}%`;
+  }
+
+  // Summary table.
+  const table = $('review-summary');
+  table.hidden = !review?.done;
+  if (review?.done) {
+    const sum = summary(positions, review.grades);
+    const tbody = table.querySelector('tbody');
+    tbody.innerHTML = '';
+    for (const c of ['w', 'b']) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<th><span class="swatch ${c}"></span><span class="nm"></span></th>
+        <td class="acc">${sum[c].accuracy ?? '–'}${sum[c].accuracy !== null ? '%' : ''}</td>
+        <td>${sum[c].inaccuracy}</td><td>${sum[c].mistake}</td><td>${sum[c].blunder}</td>`;
+      tr.querySelector('.nm').textContent = state.players[c]?.name || NAME[c];
+      tbody.appendChild(tr);
+    }
+  }
+
+  // Graph.
+  $('graph').hidden = !review?.evals?.length;
+  if (review?.evals?.length) renderGraph();
+
+  // Comment on the move that led to the shown position.
+  const comment = $('comment');
+  const g = review?.grades?.[ply];
+  if (review?.error) {
+    comment.hidden = false; comment.className = 'comment error'; comment.textContent = review.error;
+  } else if (g && ply > 0) {
+    const mv = positions[ply].move;
+    const num = Math.ceil(ply / 2) + (mv.color === 'w' ? '.' : '…');
+    comment.hidden = false;
+    comment.className = 'comment ' + g.label;
+    comment.textContent = '';
+    const strong = document.createElement('strong');
+    strong.textContent = `${num} ${mv.san}${LABELS[g.label].symbol}`;
+    comment.append(strong, ` ${LABELS[g.label].name}. `);
+    if (g.bestSan) comment.append(`Best was ${g.bestSan}. `);
+    comment.append(`Eval ${formatEval(ev)}`);
+  } else if (review?.done && ply === 0) {
+    comment.hidden = false; comment.className = 'comment';
+    comment.textContent = 'Use ◀ ▶ or the arrow keys to step through the moves. Click the graph to jump.';
+  } else {
+    comment.hidden = true;
+  }
+}
+
+function renderEvalBar(ev) {
+  const bar = $('evalbar');
+  bar.hidden = !review;
+  if (!review) return;
+  const white = ev ? winPct(ev.score) : 50;
+  const fill = bar.querySelector('.evalfill');
+  // Fill shows White's share; it grows from White's side of the board.
+  fill.style.height = white + '%';
+  bar.classList.toggle('flipped', orientation() === 'b');
+  const text = bar.querySelector('.evaltext');
+  text.textContent = ev ? formatEval(ev).replace(/^\+/, '') : '';
+  text.classList.toggle('on-white', white >= 50);
+}
+
+function renderArrow(ev) {
+  const svg = $('arrows');
+  svg.innerHTML = '';
+  if (!ev?.best) return;
+  const files = 'abcdefgh';
+  const xy = (sq) => {
+    const f = files.indexOf(sq[0]), r = Number(sq[1]) - 1;
+    return orientation() === 'w' ? [f + 0.5, 7 - r + 0.5] : [7 - f + 0.5, r + 0.5];
+  };
+  const [x1, y1] = xy(ev.best.slice(0, 2)), [x2, y2] = xy(ev.best.slice(2, 4));
+  const len = Math.hypot(x2 - x1, y2 - y1), ux = (x2 - x1) / len, uy = (y2 - y1) / len;
+  const head = 0.42, ex = x2 - ux * head, ey = y2 - uy * head; // shaft stops where the head starts
+  const px = -uy, py = ux; // perpendicular
+  svg.innerHTML = `
+    <line x1="${x1}" y1="${y1}" x2="${ex}" y2="${ey}" class="arrow-shaft"/>
+    <polygon class="arrow-head" points="${x2},${y2} ${ex + px * 0.26},${ey + py * 0.26} ${ex - px * 0.26},${ey - py * 0.26}"/>
+    <title>Stockfish's best move</title>`;
+}
+
+// Evaluation graph: White's winning chances over the game. Area below the line
+// is White's share, above is Black's. Hover for details, click to jump.
+function renderGraph() {
+  const el = $('graph');
+  const W = el.clientWidth || 280, H = 90;
+  const n = positions.length - 1 || 1;
+  const x = (i) => (i / n) * W;
+  const y = (ev) => H - (winPct(ev.score) / 100) * H;
+  const pts = review.evals.map((ev, i) => [x(i), y(ev)]);
+  const line = pts.map(([a, b]) => `${a.toFixed(1)},${b.toFixed(1)}`).join(' ');
+  const area = `0,${H} ${line} ${pts.at(-1)[0].toFixed(1)},${H}`;
+  const marks = review.grades.map((g, i) => {
+    if (!g || !['mistake', 'blunder', 'inaccuracy'].includes(g.label)) return '';
+    return `<circle class="gm ${g.label}" cx="${x(i)}" cy="${y(review.evals[i])}" r="4"/>`;
+  }).join('');
+  const cur = shownPly();
+  el.innerHTML = `
+    <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Evaluation graph">
+      <rect class="g-black" width="${W}" height="${H}"/>
+      <polygon class="g-white" points="${area}"/>
+      <line class="g-mid" x1="0" x2="${W}" y1="${H / 2}" y2="${H / 2}"/>
+      <polyline class="g-line" points="${line}"/>
+      ${marks}
+      <line class="g-cur" x1="${x(cur)}" x2="${x(cur)}" y1="0" y2="${H}"/>
+      <line class="g-hover" x1="0" x2="0" y1="0" y2="${H}" visibility="hidden"/>
+    </svg>
+    <div class="g-tip" hidden></div>`;
+
+  const svg = el.querySelector('svg'), tip = el.querySelector('.g-tip'), hl = el.querySelector('.g-hover');
+  const plyAt = (e) => {
+    const r = svg.getBoundingClientRect();
+    return Math.max(0, Math.min(review.evals.length - 1, Math.round(((e.clientX - r.left) / r.width) * n)));
+  };
+  svg.onpointermove = (e) => {
+    const i = plyAt(e);
+    hl.setAttribute('x1', x(i)); hl.setAttribute('x2', x(i)); hl.setAttribute('visibility', 'visible');
+    const mv = positions[i].move;
+    const g = review.grades[i];
+    tip.hidden = false;
+    tip.textContent = (mv ? `${Math.ceil(i / 2)}${mv.color === 'w' ? '.' : '…'} ${mv.san}${g ? LABELS[g.label].symbol : ''}  ` : 'Start  ')
+      + formatEval(review.evals[i]);
+    tip.style.left = Math.min(Math.max(x(i), 40), W - 40) + 'px';
+  };
+  svg.onpointerleave = () => { tip.hidden = true; hl.setAttribute('visibility', 'hidden'); };
+  svg.onclick = (e) => goTo(plyAt(e));
+}
+window.addEventListener('resize', () => { if (review?.evals?.length && !$('graph').hidden) renderGraph(); });
