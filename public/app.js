@@ -36,6 +36,8 @@ const boardEl = $('board');
 const promoEl = $('promo');
 
 let myColor = null; // 'w' | 'b' | null (spectator)
+let coachOf = null; // set when watching as someone's coach
+const coachToken = new URLSearchParams(location.search).get('coach');
 let state = null;
 let chess = new Chess();
 let flipped = false;
@@ -67,15 +69,31 @@ function myName() {
   }
   return n;
 }
-socket.on('connect', () => socket.emit('join', { gameId, token, name: myName() }));
+socket.on('connect', () => socket.emit('join', { gameId, token, name: myName(), coachToken }));
 let joinNotice = null;
-socket.on('joined', ({ color, token: t, notice }) => {
+socket.on('joined', ({ color, token: t, notice, coachOf: co }) => {
   myColor = color;
+  coachOf = co || null;
+  if (coachOf) setTimeout(shareShapes, 0);
   joinNotice = notice || null;
   if (t) { token = t; try { localStorage.setItem(tokenKey, t); } catch {} }
   render();
 });
 socket.on('recolor', (c) => { myColor = c; flipped = false; });
+socket.on('coach-recolor', (c) => { coachOf = c; flipped = false; });
+socket.on('shapes', ({ shapes: incoming }) => {
+  coachShapes = incoming.map((x) => ({ ...x, mine: false }));
+  renderShapes();
+});
+socket.on('coach:link', ({ token: ct }) => {
+  $('coach-card').hidden = false;
+  $('coach-link').value = location.origin + location.pathname + '?coach=' + encodeURIComponent(ct);
+});
+// Share drawings only when there's a coach on this side.
+function shareShapes() {
+  const coached = myColor && state?.players?.[myColor]?.coached;
+  if (coachOf || coached) socket.emit('shapes', shapes);
+}
 socket.on('state', (s) => {
   const prevMoves = state ? state.moves.length : 0;
   state = s;
@@ -83,6 +101,10 @@ socket.on('state', (s) => {
   chess = new Chess(s.fen);
   if (s.status !== 'over') rematchDismissed = false;
   if (s.moves.length !== prevMoves) selected = null;
+  const wasCoached = prevCoached;
+  prevCoached = !!(myColor && s.players?.[myColor]?.coached);
+  if (prevCoached && !wasCoached) setTimeout(shareShapes, 0);
+  if (!prevCoached && !coachOf) coachShapes = [];
   const wasOver = prevStatus === 'over';
   prevStatus = s.status;
   syncPositions();
@@ -94,6 +116,7 @@ socket.on('state', (s) => {
   if (s.status === 'over' && !wasOver && prevMoves >= 0) maybeVictoryGif();
 });
 let prevStatus = null;
+let prevCoached = false;
 
 function syncPositions() {
   const key = state.moves.join(' ');
@@ -119,7 +142,7 @@ socket.on('disconnect', () => {
 
 // ---------- board drawing ----------
 const orientation = () => {
-  const base = myColor || 'w';
+  const base = myColor || coachOf || 'w';
   return flipped ? (base === 'w' ? 'b' : 'w') : base;
 };
 
@@ -222,7 +245,8 @@ function renderPanel() {
     if (state.inCheck) text += ' — check!';
     const opp = myColor && state.players[myColor === 'w' ? 'b' : 'w'];
     if (opp && !opp.connected) text += ' · Opponent disconnected';
-    if (!myColor) text = 'Spectating · ' + text;
+    if (coachOf) text = `Coaching ${state.players[coachOf]?.name} · ` + (state.turn === coachOf ? 'their move' : "opponent's move");
+    else if (!myColor) text = 'Spectating · ' + text;
   }
   $('status').textContent = text;
   $('status').classList.toggle('over', state.status === 'over');
@@ -235,7 +259,10 @@ function renderPanel() {
   $('status').append(sub);
 
   // Notices: why you're spectating, or why a rated game didn't count.
-  const notice = state.notRated || (!myColor && state.status === 'waiting' ? joinNotice : null);
+  const oppColor = myColor === 'w' ? 'b' : 'w';
+  const coachNotice = myColor && state.players[oppColor]?.coached ? `${state.players[oppColor].name} has a coach watching.` : null;
+  const notice = state.notRated || (joinNotice && joinNotice.startsWith('That coach') ? joinNotice : null)
+    || (!myColor && !coachOf && state.status === 'waiting' ? joinNotice : null) || coachNotice;
   $('notice').hidden = !notice;
   $('notice').textContent = notice || '';
   if (notice && joinNotice === notice && notice.startsWith('This is a rated game')) {
@@ -276,6 +303,8 @@ function renderPanel() {
   }
   $('rematch').hidden = !(state.status === 'over' && myColor);
   $('gif-btn').hidden = !(myColor && !state.archived && state.status !== 'waiting');
+  $('coach-btn').hidden = !(myColor && !state.rated && !state.archived && state.status !== 'over') || !$('coach-card').hidden;
+  if (state.players[myColor]?.coached) $('coach-btn').textContent = 'Coach connected ✓';
   $('rematch').disabled = state.rematchOffer === myColor;
   $('rematch').textContent = state.rematchOffer === myColor ? 'Rematch requested…' : 'Rematch';
 
@@ -419,7 +448,7 @@ function shapesChanged() {
   renderShapes();
   onShapesChanged?.(shapes);
 }
-let onShapesChanged = null; // set by coaching to share drawings
+let onShapesChanged = () => shareShapes();
 
 function sqCenter(sq) {
   const f = 'abcdefgh'.indexOf(sq[0]), r = Number(sq[1]) - 1;
@@ -892,3 +921,10 @@ function maybeVictoryGif() {
   const v = loadGifs().victory;
   if (v) socket.emit('gif', { url: v });
 }
+
+$('coach-btn').onclick = () => socket.emit('coach:invite');
+$('coach-copy').onclick = async () => {
+  try { await navigator.clipboard.writeText($('coach-link').value); } catch { $('coach-link').select(); document.execCommand('copy'); }
+  $('coach-copy').textContent = 'Copied!';
+  setTimeout(() => ($('coach-copy').textContent = 'Copy'), 1500);
+};

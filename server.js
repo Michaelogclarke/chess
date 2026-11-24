@@ -130,6 +130,9 @@ function newSeat(token, user, name) {
     userId: user ? user.id : null,
     rating: null, // filled in by loadSeatRating
     sockets: new Set(),
+    teamId: randomId(9), // socket room shared with this player's coach (follows the player on rematch)
+    coachToken: null,
+    coachSockets: new Set(),
   };
 }
 
@@ -191,6 +194,7 @@ function seatInfo(game, c) {
     name: s.name,
     account: !!s.userId,
     rating: s.rating,
+    coached: !!s.coachSockets?.size,
     connected: game.archived ? true : s.sockets.size > 0,
   };
 }
@@ -546,7 +550,7 @@ io.on('connection', (socket) => {
     socket.emit('lobby', lobbyPayload());
   });
 
-  socket.on('join', async ({ gameId, token, name } = {}) => {
+  socket.on('join', async ({ gameId, token, name, coachToken } = {}) => {
     const user = socket.data.user;
     gameId = String(gameId || '').slice(0, 40);
     game = games.get(gameId) || null;
@@ -560,6 +564,20 @@ io.on('connection', (socket) => {
     color = null;
     let newToken = null;
     let notice = null;
+    // Coach link: watch from one player's side and share drawings with them.
+    const coachSeatColor = coachToken && !game.archived
+      ? ['w', 'b'].find((c) => game.seats[c]?.coachToken && game.seats[c].coachToken === coachToken) : null;
+    if (coachToken && !coachSeatColor) notice = 'That coach link is no longer valid.';
+    if (coachSeatColor && game.rated) notice = 'Coaching is not allowed in rated games.';
+    if (coachSeatColor && !game.rated) {
+      const seat = game.seats[coachSeatColor];
+      seat.coachSockets.add(socket.id);
+      socket.data.coachSeat = seat;
+      socket.join(seat.teamId);
+      socket.emit('joined', { color: null, coachOf: coachSeatColor, coachName: seat.name });
+      broadcast(game);
+      return;
+    }
     if (!game.archived) {
       // Your seat: the token this browser was given, or your account on any device.
       color = ['w', 'b'].find((c) => game.seats[c] && (
@@ -582,6 +600,7 @@ io.on('connection', (socket) => {
     if (color) {
       const seat = game.seats[color];
       seat.sockets.add(socket.id);
+      socket.join(seat.teamId);
       if (!seat.userId && name) seat.name = cleanName(name); // guests can change nickname
     }
     if (game.status === 'waiting' && game.seats.w && game.seats.b) game.status = 'playing';
@@ -613,6 +632,26 @@ io.on('connection', (socket) => {
     checkGameOver(game);
     scheduleFlag(game);
     broadcast(game);
+  });
+
+  // Coaching (casual games only).
+  socket.on('coach:invite', () => {
+    if (!isPlayer() || game.rated || game.archived) return;
+    const seat = game.seats[color];
+    seat.coachToken ||= randomId(12);
+    socket.emit('coach:link', { token: seat.coachToken });
+  });
+
+  // Drawings shared between a player and their coach.
+  socket.on('shapes', (shapes) => {
+    if (!game || game.rated) return;
+    const seat = isPlayer() ? game.seats[color] : socket.data.coachSeat;
+    if (!seat || !(seat.coachSockets.size || socket.data.coachSeat)) return;
+    if (!Array.isArray(shapes) || shapes.length > 40) return;
+    const SQ = /^[a-h][1-8]$/, BRUSH = ['green', 'red', 'blue', 'yellow'];
+    const clean = shapes.filter((x) => x && SQ.test(x.from) && (x.to === undefined || SQ.test(x.to)) && BRUSH.includes(x.brush))
+      .map((x) => ({ from: x.from, to: x.to, brush: x.brush }));
+    socket.to(seat.teamId).emit('shapes', { shapes: clean, from: socket.data.coachSeat ? 'coach' : 'player' });
   });
 
   // GIF reactions: players only, from GIPHY/Tenor only, at most one every 3 seconds.
@@ -662,6 +701,7 @@ io.on('connection', (socket) => {
       // Tell every socket its new colour.
       for (const c of ['w', 'b']) {
         for (const sid of game.seats[c].sockets) io.to(sid).emit('recolor', c);
+        for (const sid of game.seats[c].coachSockets) io.to(sid).emit('coach-recolor', c);
       }
     }
     broadcast(game);
@@ -685,7 +725,10 @@ io.on('connection', (socket) => {
       lobbyChanged();
     }
     if (!game) return;
-    for (const c of ['w', 'b']) game.seats[c]?.sockets.delete(socket.id);
+    for (const c of ['w', 'b']) {
+      game.seats[c]?.sockets.delete(socket.id);
+      game.seats[c]?.coachSockets?.delete(socket.id);
+    }
     broadcast(game);
   });
 });
