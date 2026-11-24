@@ -215,8 +215,47 @@ function lobbyChanged() {
   lobbyQueued = true;
   setImmediate(() => {
     lobbyQueued = false;
-    io.to('lobby').emit('lobby', { games: openGames(), playing: countPlaying() });
+    io.to('lobby').emit('lobby', lobbyPayload());
   });
+}
+
+function lobbyPayload() {
+  return { games: openGames(), playing: countPlaying(), online: onlineList() };
+}
+
+// ---------- presence and direct challenges ----------
+// One entry per person (account, or browser for guests), however many tabs.
+const presence = new Map(); // key -> { key, name, userId, sockets:Set }
+const challenges = new Map(); // id -> { id, from, to, minutes, increment, color, rated, timer }
+
+function isBusy(entry) {
+  for (const sid of entry.sockets) {
+    const gid = io.sockets.sockets.get(sid)?.data.gameId;
+    const g = gid && games.get(gid);
+    if (g && g.status === 'playing' && ['w', 'b'].some((c) => g.seats[c]?.sockets.has(sid))) return true;
+  }
+  return false;
+}
+
+function onlineList() {
+  return [...presence.values()].map((p) => ({
+    key: p.key, name: p.name, account: !!p.userId, rating: p.rating || null, busy: isBusy(p),
+  })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+const challengeView = (ch) => ({
+  id: ch.id, from: ch.fromName, to: ch.toName, minutes: ch.minutes, increment: ch.increment,
+  color: ch.color, rated: ch.rated,
+});
+
+const emitTo = (entry, event, data) => { for (const sid of entry.sockets) io.to(sid).emit(event, data); };
+
+function endChallenge(id) {
+  const ch = challenges.get(id);
+  if (!ch) return null;
+  clearTimeout(ch.timer);
+  challenges.delete(id);
+  return ch;
 }
 
 function countPlaying() {
@@ -396,9 +435,103 @@ io.on('connection', (socket) => {
     return !!color;
   };
 
+  // Presence: every page with a live connection says hello.
+  socket.on('hello', async ({ clientId, name } = {}) => {
+    if (socket.data.presenceKey) return;
+    const user = socket.data.user;
+    const key = user ? 'u:' + user.id : 'g:' + String(clientId || socket.id).slice(0, 40);
+    let entry = presence.get(key);
+    if (!entry) {
+      entry = { key, name: user ? user.username : cleanName(name), userId: user?.id || null, sockets: new Set() };
+      presence.set(key, entry);
+      if (user) {
+        try {
+          const blitz = await store.getRating(user.id, 'blitz');
+          if (blitz?.games) entry.rating = blitz;
+        } catch (err) { console.error(err); }
+      }
+    } else if (!user && name) {
+      entry.name = cleanName(name);
+    }
+    entry.sockets.add(socket.id);
+    socket.data.presenceKey = key;
+    socket.emit('hello-ok', { key });
+    // Re-deliver challenges still waiting for this person.
+    for (const ch of challenges.values()) if (ch.to === key) socket.emit('challenge:incoming', challengeView(ch));
+    lobbyChanged();
+  });
+
+  const me = () => presence.get(socket.data.presenceKey);
+
+  socket.on('challenge:send', ({ to, minutes, increment, color, rated } = {}) => {
+    const from = me();
+    const target = presence.get(to);
+    if (!from || !target || from === target) return socket.emit('challenge:error', 'That player is no longer online.');
+    if ([...challenges.values()].some((c) => c.from === from.key)) {
+      return socket.emit('challenge:error', 'You already have a challenge waiting. Cancel it first.');
+    }
+    minutes = Math.min(180, Math.max(0, Number(minutes) || 0));
+    increment = Math.min(60, Math.max(0, Number(increment) || 0));
+    rated = !!rated;
+    if (rated && (!from.userId || !target.userId)) return socket.emit('challenge:error', 'Rated games need both players to have an account.');
+    if (rated && minutes === 0) return socket.emit('challenge:error', 'Rated games need a clock.');
+    const id = randomId(6);
+    const ch = {
+      id, from: from.key, to: target.key, fromName: from.name, toName: target.name,
+      minutes, increment, color: ['w', 'b'].includes(color) ? color : 'random', rated,
+    };
+    ch.timer = setTimeout(() => {
+      endChallenge(id);
+      emitTo(from, 'challenge:closed', { id, reason: `${target.name} didn't answer.` });
+      emitTo(target, 'challenge:closed', { id, reason: null });
+    }, 60000);
+    challenges.set(id, ch);
+    emitTo(from, 'challenge:sent', challengeView(ch));
+    emitTo(target, 'challenge:incoming', challengeView(ch));
+  });
+
+  socket.on('challenge:cancel', ({ id } = {}) => {
+    const ch = challenges.get(id);
+    if (!ch || ch.from !== socket.data.presenceKey) return;
+    endChallenge(id);
+    const target = presence.get(ch.to);
+    if (target) emitTo(target, 'challenge:closed', { id, reason: `${ch.fromName} cancelled the challenge.` });
+    const from = me();
+    if (from) emitTo(from, 'challenge:closed', { id, reason: null });
+  });
+
+  socket.on('challenge:decline', ({ id } = {}) => {
+    const ch = challenges.get(id);
+    if (!ch || ch.to !== socket.data.presenceKey) return;
+    endChallenge(id);
+    const from = presence.get(ch.from);
+    if (from) emitTo(from, 'challenge:closed', { id, reason: `${ch.toName} declined your challenge.` });
+    const target = me();
+    if (target) emitTo(target, 'challenge:closed', { id, reason: null });
+  });
+
+  socket.on('challenge:accept', async ({ id } = {}) => {
+    const ch = challenges.get(id);
+    if (!ch || ch.to !== socket.data.presenceKey) return;
+    const from = presence.get(ch.from), target = me();
+    endChallenge(id);
+    if (!from || !target) return socket.emit('challenge:error', 'The other player went offline.');
+    const fromUser = from.userId ? { id: from.userId, username: from.name } : null;
+    const toUser = target.userId ? { id: target.userId, username: target.name } : null;
+    const { game, token, color } = newGame({
+      color: ch.color, minutes: ch.minutes, increment: ch.increment, isPublic: false,
+      name: from.name, user: fromUser, rated: ch.rated && fromUser && toUser,
+    });
+    const otherToken = randomId(18);
+    game.seats[other(color)] = newSeat(otherToken, toUser, target.name);
+    await Promise.all([loadSeatRating(game, game.seats.w), loadSeatRating(game, game.seats.b)]);
+    emitTo(from, 'challenge:start', { id, gameId: game.id, token });
+    emitTo(target, 'challenge:start', { id, gameId: game.id, token: otherToken });
+  });
+
   socket.on('lobby', () => {
     socket.join('lobby');
-    socket.emit('lobby', { games: openGames(), playing: countPlaying() });
+    socket.emit('lobby', lobbyPayload());
   });
 
   socket.on('join', async ({ gameId, token, name } = {}) => {
@@ -410,6 +543,7 @@ io.on('connection', (socket) => {
     }
     if (!game) return socket.emit('error-msg', 'Game not found. It may have expired.');
     socket.join(game.id);
+    socket.data.gameId = game.id;
 
     color = null;
     let newToken = null;
@@ -512,6 +646,22 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+    const entry = presence.get(socket.data.presenceKey);
+    if (entry) {
+      entry.sockets.delete(socket.id);
+      if (entry.sockets.size === 0) {
+        presence.delete(entry.key);
+        // Their outgoing challenges lapse.
+        for (const ch of [...challenges.values()]) {
+          if (ch.from === entry.key) {
+            endChallenge(ch.id);
+            const t = presence.get(ch.to);
+            if (t) emitTo(t, 'challenge:closed', { id: ch.id, reason: `${ch.fromName} went offline.` });
+          }
+        }
+      }
+      lobbyChanged();
+    }
     if (!game) return;
     for (const c of ['w', 'b']) game.seats[c]?.sockets.delete(socket.id);
     broadcast(game);

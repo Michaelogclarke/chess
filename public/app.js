@@ -54,6 +54,7 @@ const REVIEW_DEPTH = 16;
 
 // ---------- networking ----------
 const socket = io();
+window.initChallenges(socket);
 // Nickname from the lobby; people arriving straight from a link get a random one.
 function myName() {
   let n = null;

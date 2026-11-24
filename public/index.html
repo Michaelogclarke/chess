@@ -26,6 +26,16 @@
     </header>
 
     <div class="lobby-grid">
+      <div class="lobby-left">
+      <section class="card online" id="online-card">
+        <div class="section-head">
+          <h2>Online now</h2>
+          <span id="online-count" class="muted"></span>
+        </div>
+        <ul id="online-list" class="online-list"></ul>
+        <p id="online-empty" class="muted empty">Nobody else is online right now.</p>
+      </section>
+
       <section class="card open-games">
         <div class="section-head">
           <h2>Open games</h2>
@@ -34,6 +44,7 @@
         <ul id="open-list" class="open-list"></ul>
         <p id="open-empty" class="muted empty">No open games right now. Create one and it will show up here for others to join.</p>
       </section>
+      </div>
 
       <form id="create" class="card create">
         <h2>Create a game</h2>
@@ -87,6 +98,7 @@
   </main>
 
   <script src="/socket.io/socket.io.js"></script>
+  <script src="/challenge.js"></script>
   <script>
     // ---------- nickname ----------
     const ADJ = ['Swift', 'Clever', 'Bold', 'Quiet', 'Lucky', 'Brave', 'Sly', 'Calm', 'Wild', 'Royal', 'Sneaky', 'Mighty'];
@@ -222,9 +234,31 @@
       document.getElementById('open-empty').hidden = games.length > 0;
       document.getElementById('online').textContent = playing
         ? `${playing} game${playing === 1 ? '' : 's'} in progress` : '';
+      renderOnlinePlayers(data.online || []);
     }
 
+    // ---------- online players + challenges ----------
+    function renderOnlinePlayers(online) {
+      const list = document.getElementById('online-list');
+      const others = online.filter((p) => p.key !== window.myPresenceKey);
+      list.innerHTML = '';
+      for (const p of others) {
+        const li = document.createElement('li');
+        li.innerHTML = `<span class="dot on"></span><span class="nm"></span><span class="muted rt"></span>
+          <span class="muted busy"></span><button type="button" class="small-btn">Challenge</button>`;
+        li.querySelector('.nm').textContent = p.name;
+        li.querySelector('.rt').textContent = p.rating ? fmtRating(p.rating) : '';
+        li.querySelector('.busy').textContent = p.busy ? 'in a game' : '';
+        li.querySelector('button').onclick = () => window.challengePlayer(p);
+        list.appendChild(li);
+      }
+      document.getElementById('online-empty').hidden = others.length > 0;
+      document.getElementById('online-count').textContent = others.length ? `${others.length}` : '';
+    }
+    document.addEventListener('presence-ready', () => lastLobby && renderOpen(lastLobby));
+
     const socket = io();
+    window.initChallenges(socket);
     socket.on('connect', () => socket.emit('lobby'));
     socket.on('lobby', renderOpen);
   </script>
