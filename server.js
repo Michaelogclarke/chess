@@ -28,13 +28,21 @@ const games = new Map();
 const randomId = (bytes) => crypto.randomBytes(bytes).toString('base64url');
 const other = (c) => (c === 'w' ? 'b' : 'w');
 
-function newGame({ color, minutes, increment }) {
+// Nicknames: no accounts, just a display name the browser remembers.
+function cleanName(name) {
+  const n = String(name || '').replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 20);
+  return n || 'Anonymous';
+}
+
+function newGame({ color, minutes, increment, isPublic, name }) {
   const id = randomId(6);
   const timed = minutes > 0;
   const game = {
     id,
     chess: new Chess(),
-    seats: { w: null, b: null }, // { token, sockets:Set }
+    seats: { w: null, b: null }, // { token, name, sockets:Set }
+    isPublic, // listed in the open games lobby while waiting for an opponent
+    createdAt: Date.now(),
     time: timed ? { initial: minutes * 60000, increment: increment * 1000 } : null,
     clocks: timed ? { w: minutes * 60000, b: minutes * 60000 } : null,
     turnStartedAt: null, // when the side to move's clock started running
@@ -49,7 +57,7 @@ function newGame({ color, minutes, increment }) {
   };
   const creatorColor = color === 'w' || color === 'b' ? color : Math.random() < 0.5 ? 'w' : 'b';
   const token = randomId(18);
-  game.seats[creatorColor] = { token, sockets: new Set() };
+  game.seats[creatorColor] = { token, name: cleanName(name), sockets: new Set() };
   games.set(id, game);
   return { game, token, color: creatorColor };
 }
@@ -82,12 +90,13 @@ function publicState(game) {
     result: game.result,
     reason: game.reason,
     players: {
-      w: game.seats.w ? { connected: game.seats.w.sockets.size > 0 } : null,
-      b: game.seats.b ? { connected: game.seats.b.sockets.size > 0 } : null,
+      w: game.seats.w ? { name: game.seats.w.name, connected: game.seats.w.sockets.size > 0 } : null,
+      b: game.seats.b ? { name: game.seats.b.name, connected: game.seats.b.sockets.size > 0 } : null,
     },
     time: game.time,
     clocks: currentClocks(game),
     clockRunning: clockRunning(game) ? chess.turn() : null,
+    isPublic: game.isPublic,
     drawOffer: game.drawOffer,
     rematchOffer: game.rematchOffer,
   };
@@ -96,6 +105,39 @@ function publicState(game) {
 function broadcast(game) {
   game.touchedAt = Date.now();
   io.to(game.id).emit('state', publicState(game));
+  lobbyChanged();
+}
+
+// ---------- open games lobby ----------
+// A public game is listed while it's waiting for an opponent and its creator
+// still has the game page open, so abandoned games drop off by themselves.
+function openGames() {
+  const list = [];
+  for (const g of games.values()) {
+    if (!g.isPublic || g.status !== 'waiting') continue;
+    const color = g.seats.w ? 'w' : 'b';
+    const seat = g.seats[color];
+    if (seat.sockets.size === 0) continue;
+    list.push({ id: g.id, name: seat.name, color, time: g.time, createdAt: g.createdAt });
+  }
+  return list.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+let lobbyQueued = false;
+function lobbyChanged() {
+  // Batch bursts of changes into one update.
+  if (lobbyQueued) return;
+  lobbyQueued = true;
+  setImmediate(() => {
+    lobbyQueued = false;
+    io.to('lobby').emit('lobby', { games: openGames(), playing: countPlaying() });
+  });
+}
+
+function countPlaying() {
+  let n = 0;
+  for (const g of games.values()) if (g.status === 'playing') n++;
+  return n;
 }
 
 function endGame(game, result, reason) {
@@ -141,7 +183,9 @@ function checkGameOver(game) {
 app.post('/api/games', (req, res) => {
   const minutes = Math.min(180, Math.max(0, Number(req.body.minutes) || 0));
   const increment = Math.min(60, Math.max(0, Number(req.body.increment) || 0));
-  const { game, token, color } = newGame({ color: req.body.color, minutes, increment });
+  const { game, token, color } = newGame({
+    color: req.body.color, minutes, increment, isPublic: !!req.body.isPublic, name: req.body.name,
+  });
   res.json({ id: game.id, token, color });
 });
 
@@ -157,7 +201,12 @@ io.on('connection', (socket) => {
     return !!color;
   };
 
-  socket.on('join', ({ gameId, token } = {}) => {
+  socket.on('lobby', () => {
+    socket.join('lobby');
+    socket.emit('lobby', { games: openGames(), playing: countPlaying() });
+  });
+
+  socket.on('join', ({ gameId, token, name } = {}) => {
     game = games.get(gameId);
     if (!game) return socket.emit('error-msg', 'Game not found. It may have expired.');
     socket.join(game.id);
@@ -170,10 +219,13 @@ io.on('connection', (socket) => {
       if (empty) {
         color = empty;
         newToken = randomId(18);
-        game.seats[color] = { token: newToken, sockets: new Set() };
+        game.seats[color] = { token: newToken, name: cleanName(name), sockets: new Set() };
       }
     }
-    if (color) game.seats[color].sockets.add(socket.id);
+    if (color) {
+      game.seats[color].sockets.add(socket.id);
+      if (name) game.seats[color].name = cleanName(name); // pick up name changes
+    }
     if (game.status === 'waiting' && game.seats.w && game.seats.b) game.status = 'playing';
 
     socket.emit('joined', { color, token: newToken || (color && game.seats[color].token) });

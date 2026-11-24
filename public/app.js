@@ -37,7 +37,19 @@ let rematchDismissed = false;
 
 // ---------- networking ----------
 const socket = io();
-socket.on('connect', () => socket.emit('join', { gameId, token }));
+// Nickname from the lobby; people arriving straight from a link get a random one.
+function myName() {
+  let n = null;
+  try { n = localStorage.getItem('chess-name'); } catch {}
+  if (!n) {
+    const pick = (a) => a[Math.floor(Math.random() * a.length)];
+    n = pick(['Swift', 'Clever', 'Bold', 'Quiet', 'Lucky', 'Brave', 'Sly', 'Calm'])
+      + pick(['Knight', 'Bishop', 'Rook', 'Pawn', 'Queen', 'King']) + Math.floor(Math.random() * 90 + 10);
+    try { localStorage.setItem('chess-name', n); } catch {}
+  }
+  return n;
+}
+socket.on('connect', () => socket.emit('join', { gameId, token, name: myName() }));
 socket.on('joined', ({ color, token: t }) => {
   myColor = color;
   if (t) { token = t; try { localStorage.setItem(tokenKey, t); } catch {} }
@@ -122,7 +134,8 @@ function renderPanel() {
   for (const [id, c] of [['top-player', top], ['bottom-player', bottom]]) {
     const el = $(id), p = state.players[c];
     const you = c === myColor ? ' (you)' : '';
-    el.querySelector('.name').textContent = NAME[c] + you;
+    el.querySelector('.name').textContent = (p ? p.name : 'Waiting for opponent…') + you;
+    el.querySelector('.color').textContent = NAME[c];
     el.querySelector('.dot').className = 'dot ' + (p ? (p.connected ? 'on' : 'off') : 'none');
     el.querySelector('.dot').title = p ? (p.connected ? 'Online' : 'Disconnected') : 'Not joined yet';
     el.classList.toggle('to-move', state.status === 'playing' && state.turn === c);
@@ -137,13 +150,15 @@ function renderPanel() {
   // Status line.
   let text;
   if (state.status === 'waiting') {
-    text = myColor ? 'Waiting for your opponent to join…' : 'Waiting for players…';
+    text = !myColor ? 'Waiting for players…'
+      : state.isPublic ? 'Waiting for an opponent. Your game is listed in the lobby.'
+      : 'Waiting for your opponent to join…';
   } else if (state.status === 'over') {
     const winner = state.result === '1-0' ? 'w' : state.result === '0-1' ? 'b' : null;
-    const who = !winner ? 'Draw' : myColor ? (winner === myColor ? 'You won' : 'You lost') : NAME[winner] + ' wins';
+    const who = !winner ? 'Draw' : myColor ? (winner === myColor ? 'You won' : 'You lost') : state.players[winner].name + ' wins';
     text = `${who} by ${state.reason} (${state.result})`;
   } else {
-    text = myColor ? (state.turn === myColor ? 'Your move' : "Opponent's move") : NAME[state.turn] + ' to move';
+    text = myColor ? (state.turn === myColor ? 'Your move' : "Opponent's move") : state.players[state.turn].name + ' to move';
     if (state.inCheck) text += ' — check!';
     const opp = myColor && state.players[myColor === 'w' ? 'b' : 'w'];
     if (opp && !opp.connected) text += ' · Opponent disconnected';

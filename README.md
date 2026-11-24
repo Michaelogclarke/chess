@@ -1,6 +1,10 @@
 # Chess Online
 
-Play chess with a friend in the browser. Create a game, send the link, play.
+Play chess online in the browser. Join an open game from the lobby, post your own, or send a private link to a friend.
+
+- **Open games lobby:** the home page shows a live list of public games waiting for an opponent. Click Join to play. A game drops off the list once someone joins, or if its creator closes the page.
+- **Public or private:** public games are listed in the lobby; private games can only be joined with the link.
+- **Nicknames:** pick a display name (or roll a random one). It's remembered in your browser. No accounts or passwords.
 
 - Moves sync live over WebSockets, and the server checks every move with [chess.js](https://github.com/jhlywa/chess.js), so nobody can cheat by editing their browser.
 - Optional clocks (3+2, 5+0, 10+0, 15+10, 30+0, or custom), run by the server.
@@ -43,7 +47,7 @@ Render's free tier goes to sleep after about 15 minutes of no traffic. The first
 | File | What it does |
 | --- | --- |
 | `server.js` | Express + Socket.IO server. Creates games, gives out seats, validates moves, runs clocks, and ends games. |
-| `public/index.html` | Lobby: choose time control and colour, create a game. |
+| `public/index.html` | Lobby: nickname, live list of open games, and the create-game form. |
 | `public/game.html`, `public/app.js` | Game page: draws the board, handles input, shows clocks, move list and buttons. |
 | `public/style.css` | Styles. |
 | `public/pieces/` | SVG piece images. |
