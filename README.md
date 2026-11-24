@@ -46,5 +46,10 @@ Render's free tier goes to sleep after about 15 minutes of no traffic. The first
 | `public/index.html` | Lobby: choose time control and colour, create a game. |
 | `public/game.html`, `public/app.js` | Game page: draws the board, handles input, shows clocks, move list and buttons. |
 | `public/style.css` | Styles. |
+| `public/pieces/` | SVG piece images. |
 
 Each player gets a secret seat token, saved in their browser. It's how the server knows who you are when you reconnect. The shareable link doesn't contain it, so sharing the link can't give away your seat.
+
+## Credits
+
+Piece images are the "cburnett" set by [Colin M.L. Burnett](https://en.wikipedia.org/wiki/User:Cburnett), the same set Lichess uses. They're licensed under GPLv2+ (also available under BSD and GFDL on [Wikimedia Commons](https://commons.wikimedia.org/wiki/Category:SVG_chess_pieces)).

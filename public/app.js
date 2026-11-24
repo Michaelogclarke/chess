@@ -17,7 +17,10 @@ if (hashToken) {
   try { token = localStorage.getItem(tokenKey); } catch {}
 }
 
-const GLYPH = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟︎' };
+// SVG piece set: "cburnett" by Colin M.L. Burnett (see README for licence).
+const pieceUrl = (color, type) => `/pieces/${color}${type.toUpperCase()}.svg`;
+// Preload so pieces never flash in late.
+for (const c of 'wb') for (const t of 'kqrbnp') new Image().src = pieceUrl(c, t);
 const NAME = { w: 'White', b: 'Black' };
 const $ = (id) => document.getElementById(id);
 
@@ -98,8 +101,8 @@ function render() {
     const piece = chess.get(sq);
     if (piece) {
       const p = document.createElement('span');
-      p.className = 'pc ' + piece.color;
-      p.textContent = GLYPH[piece.type];
+      p.className = 'pc';
+      p.style.backgroundImage = `url(${pieceUrl(piece.color, piece.type)})`;
       el.appendChild(p);
     }
     if (targets.has(sq)) el.classList.add(piece ? 'capture' : 'target');
@@ -237,7 +240,8 @@ boardEl.addEventListener('pointerdown', (e) => {
   const pieceEl = boardEl.querySelector(`[data-sq="${sq}"] .pc`);
   const ghost = pieceEl.cloneNode(true);
   ghost.classList.add('ghost');
-  ghost.style.fontSize = getComputedStyle(pieceEl).fontSize;
+  const size = pieceEl.getBoundingClientRect().width;
+  ghost.style.width = ghost.style.height = size + 'px';
   document.body.appendChild(ghost);
   pieceEl.classList.add('lifted');
   drag = { from: sq, ghost, moved: false, wasSelected, x: e.clientX, y: e.clientY };
@@ -294,8 +298,9 @@ function askPromotion(from, to) {
   promoEl.innerHTML = '';
   for (const t of ['q', 'r', 'b', 'n']) {
     const b = document.createElement('button');
-    b.className = 'pc ' + myColor;
-    b.textContent = GLYPH[t];
+    b.className = 'promo-pc';
+    b.style.backgroundImage = `url(${pieceUrl(myColor, t)}), radial-gradient(circle, #fff 0%, #b0b0b0 100%)`;
+    b.setAttribute('aria-label', { q: 'Queen', r: 'Rook', b: 'Bishop', n: 'Knight' }[t]);
     b.onclick = () => { promoEl.hidden = true; sendMove(from, to, t); };
     promoEl.appendChild(b);
   }
