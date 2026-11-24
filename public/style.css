@@ -520,3 +520,18 @@ dialog.settings::backdrop { background: rgba(0, 0, 0, 0.55); }
 }
 .toast p { margin: 0 0 8px; }
 .toast p:last-child { margin: 0; }
+
+/* ---------- analysis board ---------- */
+.tabs-card { display: grid; gap: 10px; }
+.tabs-card .tabs { margin: 0; }
+.small-h { margin: 6px 0 4px; font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+#pane-play { display: grid; gap: 6px; }
+#pane-play[hidden] { display: none; }
+#levels button { min-width: 38px; }
+.lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 0.9rem; }
+.lines li { padding: 6px 8px; border-radius: 6px; background: var(--panel-2); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lines li:hover { filter: brightness(1.2); }
+.lines strong { display: inline-block; min-width: 3.6em; font-variant-numeric: tabular-nums; }
+.eng-alt { opacity: 0.35; }
+textarea { font: 0.9rem ui-monospace, monospace; color: var(--text); background: var(--bg); border: 1px solid #4a463f; border-radius: 8px; padding: 8px; width: 100%; resize: vertical; }
+.review-head .btn { margin-left: auto; }

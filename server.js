@@ -378,6 +378,7 @@ app.get('/g/:id', page('game.html'));
 app.get('/login', page('login.html'));
 app.get('/leaderboard', page('leaderboard.html'));
 app.get('/u/:username', page('profile.html'));
+app.get('/analysis', page('analysis.html'));
 
 app.use('/api', (err, req, res, next) => {
   console.error(err);

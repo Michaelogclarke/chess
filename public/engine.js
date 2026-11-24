@@ -34,10 +34,13 @@ export class Engine {
 
   // Evaluate one position. Score is from the side to move's point of view.
   // Resolves to { cp, mate, best, pv } where exactly one of cp / mate is set.
-  analyse(fen, { depth = 16, movetime = 1500 } = {}) {
+  analyse(fen, { depth = 16, movetime = 1500, skill = 20 } = {}) {
     const run = async () => {
       await this.ready;
+      await this.stopLive();
       let info = null;
+      this.worker.postMessage('setoption name MultiPV value 1');
+      this.worker.postMessage(`setoption name Skill Level value ${skill}`);
       this.worker.postMessage('position fen ' + fen);
       const bestLine = await this.command(`go depth ${depth} movetime ${movetime}`,
         (l) => l.startsWith('bestmove'),
@@ -58,7 +61,56 @@ export class Engine {
     return p;
   }
 
+  // Live analysis: search until stopped, calling onInfo with the latest
+  // lines ({ depth, multipv, cp, mate, pv }) as they improve.
+  async analyseLive(fen, { multipv = 3 } = {}, onInfo) {
+    const seq = (this.liveSeq = (this.liveSeq || 0) + 1);
+    await this.ready;
+    await this.stopLive();
+    await this.busy;
+    if (seq !== this.liveSeq) return; // a newer position was requested meanwhile
+    await this.stopLive();
+    this.worker.postMessage('setoption name Skill Level value 20');
+    this.worker.postMessage(`setoption name MultiPV value ${multipv}`);
+    this.worker.postMessage('position fen ' + fen);
+    this.live = new Promise((resolve) => {
+      const fn = (line) => {
+        if (line.startsWith('info') && line.includes(' pv ') && line.includes(' score ')) onInfo(parseInfo(line));
+        if (line.startsWith('bestmove')) { this.listeners.delete(fn); resolve(); }
+      };
+      this.listeners.add(fn);
+    });
+    this.worker.postMessage('go infinite');
+  }
+
+  // Stop the live search and wait for its final "bestmove", so that reply
+  // can't be mistaken for the end of the next search.
+  async stopLive() {
+    if (this.live) {
+      this.stopping = this.live;
+      this.live = null;
+      this.worker.postMessage('stop');
+    }
+    if (this.stopping) {
+      const s = this.stopping;
+      await s;
+      if (this.stopping === s) this.stopping = null;
+    }
+  }
+
   terminate() {
     this.worker.terminate();
   }
+}
+
+function parseInfo(line) {
+  const num = (key) => { const m = line.match(new RegExp(' ' + key + ' (-?\\d+)')); return m ? Number(m[1]) : null; };
+  const score = line.match(/ score (cp|mate) (-?\d+)/);
+  return {
+    depth: num('depth'),
+    multipv: num('multipv') || 1,
+    cp: score[1] === 'cp' ? Number(score[2]) : null,
+    mate: score[1] === 'mate' ? Number(score[2]) : null,
+    pv: line.split(' pv ')[1].trim().split(' '),
+  };
 }

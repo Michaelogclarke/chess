@@ -665,6 +665,8 @@ function renderReview() {
   if (!over) return;
 
   $('review-start').hidden = !!review;
+  $('open-analysis').href = '/analysis#moves=' + encodeURIComponent(state.moves.join(' '))
+    + (orientation() === 'b' ? '&flip=1' : '');
   const running = review && !review.done && !review.error;
   $('review-progress').hidden = !running;
   if (running) {

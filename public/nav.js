@@ -124,6 +124,7 @@
     nav.innerHTML = '';
     const left = el('div', { className: 'nav-left' });
     left.append(el('a', { href: '/', className: 'brand' }, '♞ Chess Online'));
+    left.append(el('a', { href: '/analysis', className: 'nav-link' }, 'Analysis'));
     if (me.accounts) left.append(el('a', { href: '/leaderboard', className: 'nav-link' }, 'Leaderboard'));
     nav.append(left);
 
