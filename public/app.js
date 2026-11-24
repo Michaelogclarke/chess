@@ -91,6 +91,7 @@ socket.on('state', (s) => {
   if (s.status === 'over' && !review) loadCachedReview();
   render();
   tryPremove();
+  if (s.status === 'over' && !wasOver && prevMoves >= 0) maybeVictoryGif();
 });
 let prevStatus = null;
 
@@ -274,6 +275,7 @@ function renderPanel() {
       : `${dl.left} draw offer${dl.left === 1 ? '' : 's'} left this game`;
   }
   $('rematch').hidden = !(state.status === 'over' && myColor);
+  $('gif-btn').hidden = !(myColor && !state.archived && state.status !== 'waiting');
   $('rematch').disabled = state.rematchOffer === myColor;
   $('rematch').textContent = state.rematchOffer === myColor ? 'Rematch requested…' : 'Rematch';
 
@@ -800,3 +802,93 @@ function renderGraph() {
   svg.onclick = (e) => goTo(plyAt(e));
 }
 window.addEventListener('resize', () => { if (review?.evals?.length && !$('graph').hidden) renderGraph(); });
+
+// ---------- GIF reactions ----------
+const GIF_KEY = 'chess-gifs';
+function loadGifs() {
+  try { return { list: [], victory: null, ...JSON.parse(localStorage.getItem(GIF_KEY) || '{}') }; } catch { return { list: [], victory: null }; }
+}
+function saveGifs(g) { try { localStorage.setItem(GIF_KEY, JSON.stringify(g)); } catch {} }
+
+// Turn a GIPHY page link into its image link; pass direct image links through.
+function normalizeGif(raw) {
+  let u;
+  try { u = new URL(raw.trim()); } catch { return null; }
+  if (u.protocol !== 'https:') return null;
+  if (/(^|\.)giphy\.com$/.test(u.hostname) && !/^(media\d?|i)\./.test(u.hostname)) {
+    const id = u.pathname.split('/').filter(Boolean).pop()?.split('-').pop();
+    return id && /^[A-Za-z0-9]+$/.test(id) ? `https://media.giphy.com/media/${id}/giphy.gif` : null;
+  }
+  if (/^(media\d?\.giphy\.com|i\.giphy\.com|media\.tenor\.com|c\.tenor\.com)$/.test(u.hostname) && /\.(gif|webp)$/i.test(u.pathname)) {
+    return u.origin + u.pathname;
+  }
+  return null;
+}
+
+function renderGifPanel() {
+  const g = loadGifs();
+  const grid = $('gif-grid');
+  grid.innerHTML = '';
+  for (const url of g.list) {
+    const cell = document.createElement('div');
+    cell.className = 'gif-cell';
+    const img = document.createElement('img');
+    img.src = url; img.alt = 'GIF'; img.loading = 'lazy';
+    img.onclick = () => { socket.emit('gif', { url }); $('gif-panel').hidden = true; };
+    const star = document.createElement('button');
+    star.className = 'gif-star' + (g.victory === url ? ' on' : '');
+    star.textContent = '★';
+    star.title = g.victory === url ? 'Your victory GIF' : 'Make this your victory GIF';
+    star.onclick = () => { const x = loadGifs(); x.victory = x.victory === url ? null : url; saveGifs(x); renderGifPanel(); };
+    const del = document.createElement('button');
+    del.className = 'gif-del';
+    del.textContent = '✕';
+    del.title = 'Remove';
+    del.onclick = () => { const x = loadGifs(); x.list = x.list.filter((v) => v !== url); if (x.victory === url) x.victory = null; saveGifs(x); renderGifPanel(); };
+    cell.append(img, star, del);
+    grid.appendChild(cell);
+  }
+  $('gif-empty').hidden = g.list.length > 0;
+}
+
+$('gif-btn').onclick = () => { $('gif-panel').hidden = !$('gif-panel').hidden; if (!$('gif-panel').hidden) renderGifPanel(); };
+$('gif-close').onclick = () => { $('gif-panel').hidden = true; };
+$('gif-add').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const url = normalizeGif($('gif-url').value);
+  $('gif-err').hidden = !!url;
+  if (!url) { $('gif-err').textContent = "That doesn't look like a GIPHY or Tenor GIF link."; return; }
+  const g = loadGifs();
+  if (!g.list.includes(url)) g.list.unshift(url);
+  g.list = g.list.slice(0, 40);
+  saveGifs(g);
+  $('gif-url').value = '';
+  renderGifPanel();
+});
+
+const gifTimers = {};
+socket.on('gif', ({ color, url }) => {
+  if (color !== myColor && !window.settings.get('gifs')) return;
+  const where = color === orientation() ? 'bottom' : 'top';
+  const el = $('gif-pop-' + where);
+  el.innerHTML = '';
+  const img = document.createElement('img');
+  img.src = url; img.alt = 'GIF reaction';
+  el.appendChild(img);
+  el.hidden = false;
+  clearTimeout(gifTimers[where]);
+  gifTimers[where] = setTimeout(() => { el.hidden = true; el.innerHTML = ''; }, 5000);
+});
+socket.on('gif-error', (msg) => { $('gif-err').textContent = msg; $('gif-err').hidden = false; });
+
+// Victory GIF: sent once when you win.
+let victorySentFor = null;
+function maybeVictoryGif() {
+  if (!state || state.status !== 'over' || !myColor) return;
+  const won = (state.result === '1-0' && myColor === 'w') || (state.result === '0-1' && myColor === 'b');
+  const key = positionsKey + state.result;
+  if (!won || victorySentFor === key || !state.moves.length) return;
+  victorySentFor = key;
+  const v = loadGifs().victory;
+  if (v) socket.emit('gif', { url: v });
+}

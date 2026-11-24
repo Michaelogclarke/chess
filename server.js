@@ -112,6 +112,17 @@ function declineDraw(game) {
   game.drawOffer = null;
 }
 
+// GIFs are shown to other players, so only accept direct image links from
+// well-known GIF hosts (no arbitrary sites, no tracking pages, no scripts).
+const GIF_HOSTS = /^(media\d?\.giphy\.com|i\.giphy\.com|media\.tenor\.com|c\.tenor\.com)$/;
+function isAllowedGif(url) {
+  if (typeof url !== 'string' || url.length > 500) return false;
+  try {
+    const u = new URL(url);
+    return u.protocol === 'https:' && GIF_HOSTS.test(u.hostname) && /\.(gif|webp)$/i.test(u.pathname);
+  } catch { return false; }
+}
+
 function newSeat(token, user, name) {
   return {
     token,
@@ -602,6 +613,16 @@ io.on('connection', (socket) => {
     checkGameOver(game);
     scheduleFlag(game);
     broadcast(game);
+  });
+
+  // GIF reactions: players only, from GIPHY/Tenor only, at most one every 3 seconds.
+  socket.on('gif', ({ url } = {}) => {
+    if (!isPlayer() || !game || game.archived) return;
+    const now = Date.now();
+    if (now - (socket.data.lastGif || 0) < 3000) return;
+    if (!isAllowedGif(url)) return socket.emit('gif-error', 'Only GIPHY or Tenor GIF links can be sent.');
+    socket.data.lastGif = now;
+    io.to(game.id).emit('gif', { color, url });
   });
 
   socket.on('resign', () => {

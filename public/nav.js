@@ -18,7 +18,7 @@
     coral: ['#f3e0d2', '#d08770'],
     ice: ['#eef6fb', '#7fa7c4'],
   };
-  const DEFAULTS = { pieces: 'cburnett', board: 'green', blindfold: false, sounds: true, premoves: true };
+  const DEFAULTS = { pieces: 'cburnett', board: 'green', blindfold: false, sounds: true, premoves: true, gifs: true };
   let settings = { ...DEFAULTS };
   try { settings = { ...DEFAULTS, ...JSON.parse(localStorage.getItem('chess-settings') || '{}') }; } catch {}
   if (!PIECE_SETS.includes(settings.pieces)) settings.pieces = DEFAULTS.pieces;
@@ -95,6 +95,7 @@
         ${toggle('premoves', 'Premoves', 'Queue a move while your opponent is thinking.')}
         ${toggle('sounds', 'Sounds', 'Move, capture and check sounds.')}
         ${toggle('blindfold', 'Blindfold', 'Hide the pieces on your screen. Use the move list to follow the game.')}
+        ${toggle('gifs', 'Show GIFs', "Show GIF reactions from other players. Turn off if you'd rather not see them.")}
       </form>`;
     dlg.querySelectorAll('[data-pieces]').forEach((b) => (b.onclick = () => {
       window.settings.set('pieces', b.dataset.pieces);
