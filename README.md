@@ -28,19 +28,26 @@ Open http://localhost:3000. To test online play by yourself, open the invite lin
 
 To play a friend on the same Wi-Fi, give them `http://<your-computer's-local-IP>:3000/g/...`.
 
-## Put it online (free, about 10 minutes)
+## Put it online (free, about 5 minutes)
 
-The game needs a server that stays running and supports WebSockets. [Render](https://render.com) works well:
+The game needs a server that stays running and supports WebSockets, so static hosts like GitHub Pages or serverless hosts like Vercel won't work. [Render](https://render.com) does, and this repo includes a `render.yaml` that fills in the settings for you.
 
-1. Push this repo to GitHub (already done if you're reading this there).
-2. On Render: **New → Web Service**, then connect this repository.
-3. Settings:
-   - **Build command:** `npm install`
-   - **Start command:** `npm start`
-   - **Instance type:** Free
-4. Deploy. Render gives you a URL like `https://chess-online-xxxx.onrender.com`. Share game links from there.
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/michaelogclarke/chess)
 
-Render's free tier goes to sleep after about 15 minutes of no traffic. The first visit afterwards takes around 30 seconds to wake up, and any games in progress are lost. A paid instance or [Fly.io](https://fly.io) / [Railway](https://railway.app) avoids this. The app reads the `PORT` environment variable, so those work as well.
+1. Sign up at [render.com](https://render.com) with your GitHub account.
+2. Click the button above, or in Render choose **New → Blueprint** and pick this repo.
+3. Click **Apply**. Render builds and starts the game, then gives you a URL like `https://chess-online-xxxx.onrender.com`.
+4. Send that URL to your friend.
+
+Every push to `main` redeploys automatically.
+
+If the repo is private, the button may not work. Use **New → Blueprint** instead, and give Render access to the repo when it asks.
+
+Render's free tier goes to sleep after about 15 minutes of no traffic. The first visit afterwards takes around 30 seconds to wake up, and any games in progress are lost. A paid instance avoids this. The app reads the `PORT` environment variable, so [Fly.io](https://fly.io) and [Railway](https://railway.app) work too.
+
+### Quick test without hosting
+
+Run `npm start` on your computer, then in another terminal run `npx localtunnel --port 3000`. It prints a temporary public URL you can send to a friend. It works while your computer stays on.
 
 ## How it works
 
@@ -51,6 +58,7 @@ Render's free tier goes to sleep after about 15 minutes of no traffic. The first
 | `public/game.html`, `public/app.js` | Game page: draws the board, handles input, shows clocks, move list and buttons. |
 | `public/style.css` | Styles. |
 | `public/pieces/` | SVG piece images. |
+| `render.yaml` | Render deployment settings. |
 
 Each player gets a secret seat token, saved in their browser. It's how the server knows who you are when you reconnect. The shareable link doesn't contain it, so sharing the link can't give away your seat.
 

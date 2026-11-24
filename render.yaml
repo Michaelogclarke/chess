@@ -1,0 +1,15 @@
+# Render Blueprint: lets Render set up the web service automatically.
+# In Render: New -> Blueprint -> pick this repo. Or use the Deploy button in the README.
+services:
+  - type: web
+    name: chess-online
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    autoDeploy: true # redeploy whenever main changes
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
