@@ -13,3 +13,7 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
+      # Neon Postgres connection string. Render asks for it when you create the
+      # service from this Blueprint. Leave it empty to run with guest play only.
+      - key: DATABASE_URL
+        sync: false

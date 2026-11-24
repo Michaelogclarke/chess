@@ -62,8 +62,10 @@ function myName() {
   return n;
 }
 socket.on('connect', () => socket.emit('join', { gameId, token, name: myName() }));
-socket.on('joined', ({ color, token: t }) => {
+let joinNotice = null;
+socket.on('joined', ({ color, token: t, notice }) => {
   myColor = color;
+  joinNotice = notice || null;
   if (t) { token = t; try { localStorage.setItem(tokenKey, t); } catch {} }
   render();
 });
@@ -166,6 +168,11 @@ function renderPanel() {
     const el = $(id), p = state.players[c];
     const you = c === myColor ? ' (you)' : '';
     el.querySelector('.name').textContent = (p ? p.name : 'Waiting for opponent…') + you;
+    el.querySelector('.rating').textContent = p?.rating ? fmtRating(p.rating) : '';
+    const d = state.ratingDiff?.[c];
+    const diffEl = el.querySelector('.diff');
+    diffEl.textContent = d === undefined || d === null ? '' : (d > 0 ? '+' : '') + d;
+    diffEl.className = 'diff ' + (d > 0 ? 'up' : d < 0 ? 'down' : '');
     el.querySelector('.color').textContent = NAME[c];
     el.querySelector('.dot').className = 'dot ' + (p ? (p.connected ? 'on' : 'off') : 'none');
     el.querySelector('.dot').title = p ? (p.connected ? 'Online' : 'Disconnected') : 'Not joined yet';
@@ -197,6 +204,25 @@ function renderPanel() {
   }
   $('status').textContent = text;
   $('status').classList.toggle('over', state.status === 'over');
+  const CAT = { bullet: 'Bullet', blitz: 'Blitz', rapid: 'Rapid', classical: 'Classical', casual: 'Casual' };
+  const tc = state.time ? `${state.time.initial / 60000}+${state.time.increment / 1000}` : 'No clock';
+  const sub = document.createElement('span');
+  sub.className = 'status-sub';
+  sub.textContent = `${state.rated ? 'Rated' : 'Casual'} ${state.category === 'casual' ? '' : CAT[state.category] + ' '}· ${tc}`
+    + (state.archived ? ' · Saved game' : '');
+  $('status').append(sub);
+
+  // Notices: why you're spectating, or why a rated game didn't count.
+  const notice = state.notRated || (!myColor && state.status === 'waiting' ? joinNotice : null);
+  $('notice').hidden = !notice;
+  $('notice').textContent = notice || '';
+  if (notice && joinNotice === notice && notice.startsWith('This is a rated game')) {
+    const a = document.createElement('a');
+    a.href = '/login?next=' + encodeURIComponent(location.pathname);
+    a.className = 'btn primary small-btn';
+    a.textContent = 'Log in';
+    $('notice').append(' ', a);
+  }
 
   // Draw / rematch offer from the opponent.
   const opp = myColor === 'w' ? 'b' : 'w';

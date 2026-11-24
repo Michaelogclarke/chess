@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log in · Chess Online</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/nav.js"></script>
+</head>
+<body>
+  <nav id="nav" class="site-nav"></nav>
+  <main class="narrow">
+    <div class="card auth">
+      <div class="tabs" role="tablist">
+        <button type="button" id="tab-login" role="tab" class="on">Log in</button>
+        <button type="button" id="tab-signup" role="tab">Sign up</button>
+      </div>
+      <form id="form">
+        <label>Username
+          <input id="username" autocomplete="username" required minlength="3" maxlength="20"
+                 pattern="[A-Za-z0-9_\-]{3,20}" spellcheck="false" autocapitalize="off">
+        </label>
+        <label>Password
+          <input id="password" type="password" autocomplete="current-password" required minlength="8" maxlength="200">
+        </label>
+        <p id="hint" class="muted small" hidden>3–20 letters, numbers, - or _. Password at least 8 characters.</p>
+        <button type="submit" id="submit" class="primary">Log in</button>
+        <p id="err" class="error" hidden></p>
+      </form>
+      <p class="muted small">Accounts give you a rating, a profile with your game history, and a place on the leaderboard. You can still play casual games without one.</p>
+    </div>
+  </main>
+  <script>
+    const params = new URLSearchParams(location.search);
+    // Only allow going back to a page on this site.
+    const next = (params.get('next') || '/').startsWith('/') && !(params.get('next') || '').startsWith('//')
+      ? params.get('next') || '/' : '/';
+    let mode = params.get('signup') ? 'signup' : 'login';
+    const $ = (id) => document.getElementById(id);
+
+    function setMode(m) {
+      mode = m;
+      $('tab-login').classList.toggle('on', m === 'login');
+      $('tab-signup').classList.toggle('on', m === 'signup');
+      $('submit').textContent = m === 'login' ? 'Log in' : 'Create account';
+      $('hint').hidden = m === 'login';
+      $('password').autocomplete = m === 'login' ? 'current-password' : 'new-password';
+      $('err').hidden = true;
+      document.title = (m === 'login' ? 'Log in' : 'Sign up') + ' · Chess Online';
+    }
+    $('tab-login').onclick = () => setMode('login');
+    $('tab-signup').onclick = () => setMode('signup');
+    setMode(mode);
+
+    // Suggest the guest nickname as a username when signing up.
+    try {
+      const n = localStorage.getItem('chess-name');
+      if (n && /^[A-Za-z0-9_-]{3,20}$/.test(n)) $('username').value = n;
+    } catch {}
+
+    window.mePromise.then((me) => {
+      if (me.user) location.replace(next);
+      if (!me.accounts) {
+        $('err').textContent = 'Accounts are not enabled on this server (no database configured).';
+        $('err').hidden = false;
+        $('submit').disabled = true;
+      }
+    });
+
+    $('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      $('submit').disabled = true;
+      $('err').hidden = true;
+      try {
+        const res = await fetch('/api/' + mode, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ username: $('username').value.trim(), password: $('password').value }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Something went wrong.');
+        location.href = next;
+      } catch (err) {
+        $('err').textContent = err.message;
+        $('err').hidden = false;
+        $('submit').disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

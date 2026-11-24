@@ -117,7 +117,6 @@ a.btn.primary { background: var(--accent); border-color: var(--accent); color: v
 a.btn:hover { filter: brightness(1.15); }
 
 /* ---------- game page ---------- */
-.top { padding: 10px 16px; }
 .brand { text-decoration: none; font-weight: 700; }
 
 .game {
@@ -377,3 +376,76 @@ a.btn:hover { filter: brightness(1.15); }
 .comment.inaccuracy { border-left-color: #e8c547; }
 .comment.mistake { border-left-color: #f0a04b; }
 .comment.blunder { border-left-color: #ff4d43; }
+
+/* ---------- site navigation ---------- */
+.site-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  min-height: 52px;
+  border-bottom: 1px solid #2f2c28;
+}
+.nav-left, .nav-right { display: flex; align-items: center; gap: 16px; }
+.nav-link { text-decoration: none; color: var(--muted); }
+.nav-link:hover { color: var(--text); }
+.nav-link.plain { background: none; border: 0; padding: 0; }
+.nav-user { font-weight: 600; text-decoration: none; }
+.small-btn { padding: 4px 12px; font-size: 0.9rem; }
+.lobby { padding-top: 24px; }
+
+/* ---------- shared page layouts ---------- */
+.page { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
+.page h1 { margin: 0 0 8px; }
+.page h2 { margin: 28px 0 12px; font-size: 1.15rem; }
+.narrow { max-width: 420px; margin: 0 auto; padding: 40px 16px; }
+
+.tabs { display: flex; gap: 4px; margin: 12px 0; flex-wrap: wrap; }
+.tabs button { background: none; border-color: transparent; color: var(--muted); }
+.tabs button.on { background: var(--panel-2); border-color: #4a463f; color: var(--text); font-weight: 600; }
+
+.auth { display: grid; gap: 14px; }
+.auth .tabs { margin: 0; }
+.auth form { display: grid; gap: 14px; }
+.auth label { display: grid; gap: 4px; font-size: 0.9rem; color: var(--muted); }
+.auth .primary { padding: 10px; }
+
+.table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.table th, .table td { padding: 8px 8px; text-align: left; border-top: 1px solid #3b3832; }
+.table thead th { border-top: 0; color: var(--muted); font-weight: 400; font-size: 0.85rem; }
+.table .num { text-align: right; }
+.table .strong { font-weight: 700; }
+.table a { text-decoration: none; font-weight: 600; }
+.table a:hover { text-decoration: underline; }
+.table a.btn { font-weight: 400; }
+.table .swatch { display: inline-block; vertical-align: -2px; }
+@media (max-width: 600px) { .hide-sm { display: none; } }
+
+.rating-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-top: 20px; }
+.rating-card { display: grid; gap: 2px; text-decoration: none; }
+.rating-card strong { font-size: 1.8rem; font-variant-numeric: tabular-nums; }
+.rating-card:hover { filter: brightness(1.15); }
+
+.outcome { font-weight: 700; }
+.outcome.win, .up { color: #8fd16a; }
+.outcome.loss, .down { color: #ff7a73; }
+.outcome.draw { color: var(--muted); }
+
+.tag {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #4a6b2c;
+  color: #fff;
+  vertical-align: 1px;
+}
+.signed-in { margin: 0; font-size: 1.05rem; }
+
+/* ---------- game page additions ---------- */
+.player .rating { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.player .diff { font-weight: 700; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+.status-sub { display: block; font-weight: 400; font-size: 0.85rem; opacity: 0.8; margin-top: 2px; }
+.notice { border-left: 4px solid #e8c547; }

@@ -5,15 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Chess Online</title>
   <link rel="stylesheet" href="/style.css">
+  <script src="/nav.js"></script>
 </head>
 <body>
+  <nav id="nav" class="site-nav"></nav>
   <main class="lobby">
     <header class="lobby-head">
       <div>
         <h1>♞ Chess Online</h1>
         <p class="muted">Join an open game, post your own, or send a private link to a friend.</p>
       </div>
-      <label class="name-field">
+      <p id="signed-in" class="signed-in" hidden></p>
+      <label class="name-field" id="name-field">
         Your name
         <span class="copy">
           <input id="name" maxlength="20" autocomplete="nickname" spellcheck="false">
@@ -60,6 +63,15 @@
         </fieldset>
 
         <fieldset>
+          <legend>Game type</legend>
+          <div class="chips" id="mode">
+            <button type="button" data-r="0" class="on">Casual</button>
+            <button type="button" data-r="1">Rated</button>
+          </div>
+          <p id="mode-help" class="muted small"></p>
+        </fieldset>
+
+        <fieldset>
           <legend>Who can join</legend>
           <div class="chips" id="visibility">
             <button type="button" data-v="public" class="on">Public</button>
@@ -103,6 +115,8 @@
     const increment = document.getElementById('increment');
     let color = 'random';
     let visibility = 'public';
+    let rated = false;
+    let me = { accounts: false, user: null };
 
     const pick = (group, btn) => group.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === btn));
     const onChip = (id, fn) => document.getElementById(id).addEventListener('click', (e) => {
@@ -112,6 +126,34 @@
     onChip('presets', (b) => { minutes.value = b.dataset.m; increment.value = b.dataset.i; });
     onChip('colors', (b) => { color = b.dataset.c; });
     onChip('visibility', (b) => { visibility = b.dataset.v; showVisHelp(); });
+    onChip('mode', (b) => { rated = b.dataset.r === '1'; showModeHelp(); });
+
+    function showModeHelp() {
+      const help = document.getElementById('mode-help');
+      const ratedBtn = document.querySelector('#mode [data-r="1"]');
+      ratedBtn.disabled = !me.user;
+      if (!me.user && rated) { rated = false; pick(document.getElementById('mode'), document.querySelector('#mode [data-r="0"]')); }
+      if (!me.accounts) { document.getElementById('mode').closest('fieldset').hidden = true; return; }
+      help.textContent = !me.user ? 'Log in to play rated games.'
+        : rated ? 'Counts towards your rating. Both players need an account, and it needs a clock.'
+        : "Just for fun. Your rating won't change.";
+    }
+
+    window.mePromise.then((m) => {
+      me = m;
+      if (me.user) {
+        // Logged in: your username is your name.
+        document.getElementById('name-field').hidden = true;
+        const el = document.getElementById('signed-in');
+        el.hidden = false;
+        el.textContent = 'Playing as ';
+        const b = document.createElement('strong');
+        b.textContent = me.user.username;
+        el.append(b);
+      }
+      showModeHelp();
+      if (lastLobby) renderOpen(lastLobby);
+    });
     [minutes, increment].forEach((el) => el.addEventListener('input', () =>
       document.querySelectorAll('#presets button').forEach((b) =>
         b.classList.toggle('on', b.dataset.m === minutes.value && b.dataset.i === increment.value))));
@@ -131,10 +173,10 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             minutes: minutes.value, increment: increment.value, color,
-            isPublic: visibility === 'public', name: nameEl.value.trim(),
+            isPublic: visibility === 'public', name: nameEl.value.trim(), rated,
           }),
         });
-        if (!res.ok) throw new Error('Server error');
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Server error');
         const { id, token } = await res.json();
         store.set('chess-token-' + id, token);
         location.href = '/g/' + id + '#t=' + token;
@@ -153,18 +195,27 @@
       return est < 180 ? 'Bullet' : est < 480 ? 'Blitz' : est < 1500 ? 'Rapid' : 'Classical';
     };
 
-    function renderOpen({ games, playing }) {
+    let lastLobby = null;
+    function renderOpen(data) {
+      lastLobby = data;
+      const { games, playing } = data;
       listEl.innerHTML = '';
       for (const g of games) {
         const mine = !!store.get('chess-token-' + g.id);
         const li = document.createElement('li');
         const you = g.color === 'w' ? 'Black' : 'White';
         li.innerHTML = `
-          <span class="who"><span class="swatch ${g.color}"></span><span class="nm"></span></span>
-          <span class="tc"><strong>${fmtTime(g.time)}</strong> <span class="muted">${kind(g.time)}</span></span>
+          <span class="who"><span class="swatch ${g.color}"></span><span class="nm"></span><span class="muted rt"></span></span>
+          <span class="tc"><strong>${fmtTime(g.time)}</strong> <span class="muted">${kind(g.time)}</span>${g.rated ? ' <span class="tag">Rated</span>' : ''}</span>
           <span class="muted side-label">You play ${you}</span>
           <a class="btn ${mine ? '' : 'primary'}" href="/g/${g.id}">${mine ? 'Your game' : 'Join'}</a>`;
         li.querySelector('.nm').textContent = g.name; // names are user input: never via innerHTML
+        li.querySelector('.rt').textContent = g.rating ? ' ' + fmtRating(g.rating) : '';
+        if (g.rated && !me.user && !mine) {
+          const a = li.querySelector('a.btn');
+          a.textContent = 'Log in to join';
+          a.href = '/login?next=' + encodeURIComponent('/g/' + g.id);
+        }
         if (mine) li.querySelector('.side-label').textContent = 'Waiting for opponent…';
         listEl.appendChild(li);
       }

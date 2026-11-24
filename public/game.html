@@ -5,16 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Chess Online</title>
   <link rel="stylesheet" href="/style.css">
+  <script src="/nav.js"></script>
 </head>
 <body>
-  <header class="top">
-    <a href="/" class="brand">♞ Chess Online</a>
-  </header>
+  <nav id="nav" class="site-nav"></nav>
 
   <main class="game">
     <section class="board-col">
       <div class="player" id="top-player">
-        <span class="dot"></span><span class="name"></span><span class="color"></span><span class="clock"></span>
+        <span class="dot"></span><span class="name"></span><span class="rating"></span><span class="diff"></span><span class="color"></span><span class="clock"></span>
       </div>
       <div class="board-row">
         <div id="evalbar" class="evalbar" hidden aria-hidden="true">
@@ -27,7 +26,7 @@
         </div>
       </div>
       <div class="player" id="bottom-player">
-        <span class="dot"></span><span class="name"></span><span class="color"></span><span class="clock"></span>
+        <span class="dot"></span><span class="name"></span><span class="rating"></span><span class="diff"></span><span class="color"></span><span class="clock"></span>
       </div>
     </section>
 
@@ -42,6 +41,7 @@
       </div>
 
       <div id="status" class="card status"></div>
+      <div id="notice" class="card notice" hidden></div>
 
       <div id="offer" class="card offer" hidden>
         <span id="offer-text"></span>
