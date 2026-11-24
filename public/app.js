@@ -683,7 +683,7 @@ function renderReview() {
       const tr = document.createElement('tr');
       tr.innerHTML = `<th><span class="swatch ${c}"></span><span class="nm"></span></th>
         <td class="acc">${sum[c].accuracy ?? '–'}${sum[c].accuracy !== null ? '%' : ''}</td>
-        <td>${sum[c].inaccuracy}</td><td>${sum[c].mistake}</td><td>${sum[c].blunder}</td>`;
+        <td class="${sum[c].brilliant ? 'bril' : ''}">${sum[c].brilliant}</td><td>${sum[c].inaccuracy}</td><td>${sum[c].mistake}</td><td>${sum[c].blunder}</td>`;
       tr.querySelector('.nm').textContent = state.players[c]?.name || NAME[c];
       tbody.appendChild(tr);
     }
@@ -762,7 +762,7 @@ function renderGraph() {
   const line = pts.map(([a, b]) => `${a.toFixed(1)},${b.toFixed(1)}`).join(' ');
   const area = `0,${H} ${line} ${pts.at(-1)[0].toFixed(1)},${H}`;
   const marks = review.grades.map((g, i) => {
-    if (!g || !['mistake', 'blunder', 'inaccuracy'].includes(g.label)) return '';
+    if (!g || !['brilliant', 'mistake', 'blunder', 'inaccuracy'].includes(g.label)) return '';
     return `<circle class="gm ${g.label}" cx="${x(i)}" cy="${y(review.evals[i])}" r="4"/>`;
   }).join('');
   const cur = shownPly();

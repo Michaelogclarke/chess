@@ -343,9 +343,11 @@ a.btn:hover { filter: brightness(1.15); }
 .review-summary tbody th { display: flex; align-items: center; gap: 6px; }
 .review-summary .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .review-summary .acc { font-weight: 700; font-size: 1.1rem; }
-.review-summary thead th:nth-child(3) { color: #e8c547; }
-.review-summary thead th:nth-child(4) { color: #f0a04b; }
-.review-summary thead th:nth-child(5) { color: #ff7a73; }
+.review-summary thead th:nth-child(3) { color: #2ec4b6; }
+.review-summary thead th:nth-child(4) { color: #e8c547; }
+.review-summary thead th:nth-child(5) { color: #f0a04b; }
+.review-summary thead th:nth-child(6) { color: #ff7a73; }
+.review-summary td.bril { color: #2ec4b6; font-weight: 700; }
 
 .graph { position: relative; }
 .graph svg { display: block; border-radius: 6px; cursor: pointer; }
@@ -492,3 +494,8 @@ dialog.settings::backdrop { background: rgba(0, 0, 0, 0.55); }
 .shape.blue { color: #0b5fbf; }
 .shape.yellow { color: #e0a800; }
 .shape.shared { opacity: 0.55; }
+
+.mv.brilliant { color: #2ec4b6; font-weight: 700; }
+.mv.current.brilliant { color: #fff; }
+.comment.brilliant { border-left-color: #2ec4b6; }
+.gm.brilliant { fill: #2ec4b6; }
