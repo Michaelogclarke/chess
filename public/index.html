@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chess Online</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="lobby">
+    <h1>♞ Chess Online</h1>
+    <p class="muted">Create a game, send the link to a friend, and play.</p>
+
+    <form id="create" class="card">
+      <fieldset>
+        <legend>Time control</legend>
+        <div class="chips" id="presets">
+          <button type="button" data-m="3" data-i="2">3+2</button>
+          <button type="button" data-m="5" data-i="0">5+0</button>
+          <button type="button" data-m="10" data-i="0" class="on">10+0</button>
+          <button type="button" data-m="15" data-i="10">15+10</button>
+          <button type="button" data-m="30" data-i="0">30+0</button>
+          <button type="button" data-m="0" data-i="0">No clock</button>
+        </div>
+        <div class="row">
+          <label>Minutes <input id="minutes" type="number" min="0" max="180" value="10"></label>
+          <label>Increment (s) <input id="increment" type="number" min="0" max="60" value="0"></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Play as</legend>
+        <div class="chips" id="colors">
+          <button type="button" data-c="w">White</button>
+          <button type="button" data-c="random" class="on">Random</button>
+          <button type="button" data-c="b">Black</button>
+        </div>
+      </fieldset>
+
+      <button type="submit" class="primary">Create game</button>
+      <p id="err" class="error" hidden></p>
+    </form>
+  </main>
+
+  <script>
+    const minutes = document.getElementById('minutes');
+    const increment = document.getElementById('increment');
+    let color = 'random';
+
+    const pick = (group, btn) => {
+      group.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === btn));
+    };
+    document.getElementById('presets').addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      pick(e.currentTarget, b);
+      minutes.value = b.dataset.m; increment.value = b.dataset.i;
+    });
+    [minutes, increment].forEach((el) => el.addEventListener('input', () =>
+      document.querySelectorAll('#presets button').forEach((b) =>
+        b.classList.toggle('on', b.dataset.m === minutes.value && b.dataset.i === increment.value))));
+    document.getElementById('colors').addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      pick(e.currentTarget, b); color = b.dataset.c;
+    });
+
+    document.getElementById('create').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        const res = await fetch('/api/games', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ minutes: minutes.value, increment: increment.value, color }),
+        });
+        if (!res.ok) throw new Error('Server error');
+        const { id, token } = await res.json();
+        try { localStorage.setItem('chess-token-' + id, token); } catch {}
+        location.href = '/g/' + id + '#t=' + token;
+      } catch (err) {
+        const el = document.getElementById('err');
+        el.textContent = 'Could not create game: ' + err.message; el.hidden = false;
+      }
+    });
+  </script>
+</body>
+</html>
