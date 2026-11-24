@@ -12,6 +12,7 @@ const { Chess } = require('chess.js');
 const db = require('./db');
 const auth = require('./auth');
 const store = require('./store');
+const variants = require('./variants');
 
 const PORT = process.env.PORT || 3000;
 const GAME_TTL_MS = 24 * 60 * 60 * 1000; // forget games idle for a day
@@ -57,17 +58,20 @@ function cleanName(name) {
   return n || 'Anonymous';
 }
 
-function newGame({ color, minutes, increment, isPublic, name, user, rated }) {
+function newGame({ color, minutes, increment, isPublic, name, user, rated, variant }) {
   const id = randomId(6);
+  variant = variants.VARIANTS[variant] ? variant : 'standard';
   const timed = minutes > 0;
   const time = timed ? { initial: minutes * 60000, increment: increment * 1000 } : null;
   const game = {
     id,
     round: 0, // bumps on each rematch; each round is saved as its own game
-    chess: new Chess(),
+    variant,
+    chess: variants.newBoard(variant),
+    hq: variant === 'hiddenqueen' ? variants.freshHiddenQueen() : null,
     seats: { w: null, b: null }, // { token, name, userId, rating, sockets:Set }
     isPublic, // listed in the open games lobby while waiting for an opponent
-    rated: !!(rated && user && timed),
+    rated: !!(rated && user && timed && variant === 'standard'), // variants are casual for now
     category: store.categoryFor(time),
     ratingDiff: null,
     notRated: null, // why a rated game didn't count, e.g. too short
@@ -88,6 +92,7 @@ function newGame({ color, minutes, increment, isPublic, name, user, rated }) {
   const creatorColor = color === 'w' || color === 'b' ? color : Math.random() < 0.5 ? 'w' : 'b';
   const token = randomId(18);
   game.seats[creatorColor] = newSeat(token, user, name);
+  if (variant !== 'standard') game.snaps = [variants.snapshot(game)];
   games.set(id, game);
   return { game, token, color: creatorColor };
 }
@@ -173,6 +178,9 @@ function publicState(game) {
     players: { w: seatInfo(game, 'w'), b: seatInfo(game, 'b') },
     rated: game.rated,
     category: game.category,
+    variant: game.variant || 'standard',
+    variantName: variants.VARIANTS[game.variant || 'standard'],
+    reviewable: !game.variant || game.variant === 'standard' || game.variant === 'hiddenqueen',
     ratingDiff: game.ratingDiff,
     notRated: game.notRated,
     archived: !!game.archived,
@@ -185,6 +193,14 @@ function publicState(game) {
     drawLimits: game.drawOffersMade ? { w: drawStatus(game, 'w'), b: drawStatus(game, 'b') } : null,
     rematchOffer: game.rematchOffer,
   };
+}
+
+function viewerOf(game, sid) {
+  return ['w', 'b'].find((c) => game.seats[c]?.sockets.has(sid) || game.seats[c]?.coachSockets?.has(sid)) || null;
+}
+function stateFor(game, sid) {
+  const base = publicState(game);
+  return game.snaps ? { ...base, ...variants.viewFor(game, viewerOf(game, sid)) } : base;
 }
 
 function seatInfo(game, c) {
@@ -201,7 +217,15 @@ function seatInfo(game, c) {
 
 function broadcast(game) {
   game.touchedAt = Date.now();
-  io.to(game.id).emit('state', publicState(game));
+  if (!game.snaps) {
+    io.to(game.id).emit('state', publicState(game));
+  } else {
+    // Variants hide different things from each player, so each gets their own view.
+    const base = publicState(game);
+    for (const sid of io.sockets.adapter.rooms.get(game.id) || []) {
+      io.to(sid).emit('state', { ...base, ...variants.viewFor(game, viewerOf(game, sid)) });
+    }
+  }
   lobbyChanged();
 }
 
@@ -218,6 +242,7 @@ function openGames() {
     list.push({
       id: g.id, name: seat.name, color, time: g.time, createdAt: g.createdAt,
       rated: g.rated, rating: seat.rating, account: !!seat.userId,
+      variant: g.variant, variantName: variants.VARIANTS[g.variant],
     });
   }
   return list.sort((a, b) => b.createdAt - a.createdAt);
@@ -260,7 +285,7 @@ function onlineList() {
 
 const challengeView = (ch) => ({
   id: ch.id, from: ch.fromName, to: ch.toName, minutes: ch.minutes, increment: ch.increment,
-  color: ch.color, rated: ch.rated,
+  color: ch.color, rated: ch.rated, variant: ch.variant, variantName: variants.VARIANTS[ch.variant],
 });
 
 const emitTo = (entry, event, data) => { for (const sid of entry.sockets) io.to(sid).emit(event, data); };
@@ -293,7 +318,7 @@ function endGame(game, result, reason) {
 // Save a finished game and apply rating changes. Games where neither player
 // has an account aren't saved: there's nowhere to list them.
 async function persistGame(game) {
-  if (!db.enabled || game.archived) return;
+  if (!db.enabled || game.archived || (game.variant && game.variant !== 'standard')) return;
   const round = game.round;
   const moves = game.chess.history();
   const { w, b } = game.seats;
@@ -342,6 +367,11 @@ function scheduleFlag(game) {
 
 function checkGameOver(game) {
   const { chess } = game;
+  if (game.variant === 'fog') {
+    if (chess.kingCaptured) endGame(game, chess.kingCaptured === 'w' ? '0-1' : '1-0', 'king capture');
+    else if (!chess.pseudoMoves(chess.turn()).length) endGame(game, '1/2-1/2', 'no moves left');
+    return;
+  }
   if (chess.isCheckmate()) endGame(game, chess.turn() === 'w' ? '0-1' : '1-0', 'checkmate');
   else if (chess.isStalemate()) endGame(game, '1/2-1/2', 'stalemate');
   else if (chess.isInsufficientMaterial()) endGame(game, '1/2-1/2', 'insufficient material');
@@ -357,7 +387,7 @@ app.post('/api/games', async (req, res, next) => {
     if (req.body.rated && minutes === 0) return res.status(400).json({ error: 'Rated games need a clock.' });
     const { game, token, color } = newGame({
       color: req.body.color, minutes, increment, isPublic: !!req.body.isPublic, name: req.body.name,
-      user: req.user, rated: !!req.body.rated,
+      user: req.user, rated: !!req.body.rated, variant: req.body.variant,
     });
     await loadSeatRating(game, game.seats[color]);
     res.json({ id: game.id, token, color });
@@ -479,7 +509,7 @@ io.on('connection', (socket) => {
 
   const me = () => presence.get(socket.data.presenceKey);
 
-  socket.on('challenge:send', ({ to, minutes, increment, color, rated } = {}) => {
+  socket.on('challenge:send', ({ to, minutes, increment, color, rated, variant } = {}) => {
     const from = me();
     const target = presence.get(to);
     if (!from || !target || from === target) return socket.emit('challenge:error', 'That player is no longer online.');
@@ -495,7 +525,9 @@ io.on('connection', (socket) => {
     const ch = {
       id, from: from.key, to: target.key, fromName: from.name, toName: target.name,
       minutes, increment, color: ['w', 'b'].includes(color) ? color : 'random', rated,
+      variant: variants.VARIANTS[variant] ? variant : 'standard',
     };
+    if (ch.variant !== 'standard') ch.rated = false;
     ch.timer = setTimeout(() => {
       endChallenge(id);
       emitTo(from, 'challenge:closed', { id, reason: `${target.name} didn't answer.` });
@@ -536,7 +568,7 @@ io.on('connection', (socket) => {
     const toUser = target.userId ? { id: target.userId, username: target.name } : null;
     const { game, token, color } = newGame({
       color: ch.color, minutes: ch.minutes, increment: ch.increment, isPublic: false,
-      name: from.name, user: fromUser, rated: ch.rated && fromUser && toUser,
+      name: from.name, user: fromUser, rated: ch.rated && fromUser && toUser, variant: ch.variant,
     });
     const otherToken = randomId(18);
     game.seats[other(color)] = newSeat(otherToken, toUser, target.name);
@@ -603,7 +635,9 @@ io.on('connection', (socket) => {
       socket.join(seat.teamId);
       if (!seat.userId && name) seat.name = cleanName(name); // guests can change nickname
     }
-    if (game.status === 'waiting' && game.seats.w && game.seats.b) game.status = 'playing';
+    if (game.status === 'waiting' && game.seats.w && game.seats.b) {
+      game.status = game.variant === 'hiddenqueen' ? 'setup' : 'playing';
+    }
 
     socket.emit('joined', { color, token: newToken || (color && game.seats[color].token), notice });
     broadcast(game);
@@ -611,12 +645,18 @@ io.on('connection', (socket) => {
 
   socket.on('move', ({ from, to, promotion } = {}) => {
     if (!isPlayer() || game.status !== 'playing') return;
-    if (game.chess.turn() !== color) return socket.emit('state', publicState(game));
+    if (game.chess.turn() !== color) return socket.emit('state', stateFor(game, socket.id));
     let move;
     try {
       move = game.chess.move({ from, to, promotion: promotion || 'q' });
     } catch {
-      return socket.emit('state', publicState(game)); // illegal: resync the client
+      return socket.emit('state', stateFor(game, socket.id)); // illegal: resync the client
+    }
+    if (game.variant === 'hiddenqueen') {
+      const shown = variants.hiddenQueenAfterMove(game, move);
+      game.snaps.push(variants.snapshot(game, move, shown));
+    } else if (game.snaps) {
+      game.snaps.push(variants.snapshot(game, move));
     }
     const now = Date.now();
     if (game.time) {
@@ -631,6 +671,20 @@ io.on('connection', (socket) => {
     if (game.drawOffer && game.drawOffer !== color) declineDraw(game); // moving declines
     checkGameOver(game);
     scheduleFlag(game);
+    broadcast(game);
+  });
+
+  // Hidden Queen: each player secretly picks the pawn that is really their queen.
+  socket.on('hq:pick', (square) => {
+    if (!isPlayer() || game.variant !== 'hiddenqueen' || game.status !== 'setup') return;
+    const p = typeof square === 'string' && /^[a-h][1-8]$/.test(square) ? game.chess.get(square) : null;
+    if (!p || p.type !== 'p' || p.color !== color || game.hq[color].square) return;
+    game.hq[color].square = square;
+    if (game.hq.w.square && game.hq.b.square) {
+      variants.applyHiddenQueens(game);
+      game.snaps = [variants.snapshot(game)];
+      game.status = 'playing';
+    }
     broadcast(game);
   });
 
@@ -665,7 +719,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('resign', () => {
-    if (!isPlayer() || game.status !== 'playing') return;
+    if (!isPlayer() || (game.status !== 'playing' && game.status !== 'setup')) return;
     endGame(game, color === 'w' ? '0-1' : '1-0', 'resignation');
     broadcast(game);
   });
@@ -690,10 +744,12 @@ io.on('connection', (socket) => {
     } else if (game.rematchOffer === other(color)) {
       // Fresh board in the same room, colours swapped.
       game.seats = { w: game.seats.b, b: game.seats.w };
-      game.chess = new Chess();
+      game.chess = variants.newBoard(game.variant);
       game.clocks = game.time ? { w: game.time.initial, b: game.time.initial } : null;
       game.turnStartedAt = null;
-      game.status = 'playing';
+      game.status = game.variant === 'hiddenqueen' ? 'setup' : 'playing';
+      if (game.variant === 'hiddenqueen') game.hq = variants.freshHiddenQueen();
+      if (game.snaps) game.snaps = [variants.snapshot(game)];
       game.round++;
       game.result = game.reason = game.lastMove = game.drawOffer = game.rematchOffer = null;
       game.ratingDiff = game.notRated = game.savedId = null;

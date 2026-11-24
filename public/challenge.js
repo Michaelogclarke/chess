@@ -85,6 +85,12 @@
           <button type="button" data-m="30" data-i="0">30+0</button>
           <button type="button" data-m="0" data-i="0">No clock</button>
         </div>
+        <h3>Variant</h3>
+        <div class="chips" data-group="variant">
+          <button type="button" data-v="standard" class="on">Standard</button>
+          <button type="button" data-v="hiddenqueen">Hidden Queen</button>
+          <button type="button" data-v="fog">Fog of War</button>
+        </div>
         <h3>You play</h3>
         <div class="chips" data-group="color">
           <button type="button" data-c="w">White</button>
@@ -115,7 +121,8 @@
         minutes: Number(on('tc').dataset.m),
         increment: Number(on('tc').dataset.i),
         color: on('color').dataset.c,
-        rated,
+        rated: rated && on('variant').dataset.v === 'standard',
+        variant: on('variant').dataset.v,
       });
     };
     dlg.returnValue = '';
@@ -134,12 +141,12 @@
     });
 
     socket.on('challenge:sent', (c) => {
-      toast('ch-' + c.id, `Challenge sent to ${c.to}: ${fmtTime(c)}${c.rated ? ' rated' : ''}, ${colorText(c, true)}. Waiting…`,
+      toast('ch-' + c.id, `Challenge sent to ${c.to}: ${fmtTime(c)}${c.rated ? ' rated' : ''}${c.variant !== 'standard' ? ' ' + c.variantName : ''}, ${colorText(c, true)}. Waiting…`,
         [['Cancel', () => socket.emit('challenge:cancel', { id: c.id })]]);
     });
     socket.on('challenge:incoming', (c) => {
       window.playSound?.('notify');
-      toast('ch-' + c.id, `${c.from} challenges you: ${fmtTime(c)}${c.rated ? ' rated' : ' casual'}, ${colorText(c, false)}.`, [
+      toast('ch-' + c.id, `${c.from} challenges you: ${fmtTime(c)}${c.rated ? ' rated' : ' casual'}${c.variant !== 'standard' ? ' ' + c.variantName : ''}, ${colorText(c, false)}.`, [
         ['Accept', () => socket.emit('challenge:accept', { id: c.id }), true],
         ['Decline', () => socket.emit('challenge:decline', { id: c.id })],
       ]);

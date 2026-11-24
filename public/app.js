@@ -30,6 +30,37 @@ document.addEventListener('settings-change', (e) => {
   if (['pieces', 'blindfold'].includes(e.detail.key)) render();
 });
 const NAME = { w: 'White', b: 'Black' };
+
+// Variant positions can hide pieces (even kings), which chess.js won't load,
+// so variants use this read-only view and get legal moves from the server.
+class BoardView {
+  constructor(fen, check = false) {
+    this.cells = {};
+    const [placement, turn] = fen.split(' ');
+    placement.split('/').forEach((row, r) => {
+      let f = 0;
+      for (const ch of row) {
+        if (/\d/.test(ch)) { f += Number(ch); continue; }
+        this.cells['abcdefgh'[f] + (8 - r)] = { type: ch.toLowerCase(), color: ch === ch.toUpperCase() ? 'w' : 'b' };
+        f++;
+      }
+    });
+    this._turn = turn;
+    this._check = check;
+  }
+  get(sq) { return this.cells[sq]; }
+  turn() { return this._turn; }
+  inCheck() { return this._check; }
+  board() {
+    const rows = [];
+    for (let r = 8; r >= 1; r--) rows.push([...'abcdefgh'].map((f) => (this.cells[f + r] ? { ...this.cells[f + r], square: f + r } : null)));
+    return rows;
+  }
+}
+const isVariant = () => !!state && !!state.variant && state.variant !== 'standard';
+const makeBoard = (fen, check) => (isVariant() ? new BoardView(fen, check) : new Chess(fen));
+// Legal destination squares for a piece on the live board.
+const legalTargets = (sq) => (state?.dests ? state.dests[sq] || [] : chess.moves({ square: sq, verbose: true }).map((m) => m.to));
 const $ = (id) => document.getElementById(id);
 
 const boardEl = $('board');
@@ -98,7 +129,7 @@ socket.on('state', (s) => {
   const prevMoves = state ? state.moves.length : 0;
   state = s;
   receivedAt = performance.now();
-  chess = new Chess(s.fen);
+  chess = makeBoard(s.fen, s.inCheck);
   if (s.status !== 'over') rematchDismissed = false;
   if (s.moves.length !== prevMoves) selected = null;
   const wasCoached = prevCoached;
@@ -118,14 +149,24 @@ socket.on('state', (s) => {
 let prevStatus = null;
 let prevCoached = false;
 
+let startFen = null; // variants send their own start position
 function syncPositions() {
   const key = state.moves.join(' ');
-  if (key === positionsKey) return;
+  const start = state.positions ? state.positions[0].fen : null;
+  if (key === positionsKey && start === startFen && !state.positions) return;
   // A new game (rematch) or a correction from the server: drop history view and review.
-  if (!key.startsWith(positionsKey)) { viewPly = null; stopReview(); review = null; }
-  const grew = state.moves.length > positions.length - 1 && positions.length > 0 && key.startsWith(positionsKey);
+  const sameGame = start === startFen && key.startsWith(positionsKey);
+  if (!sameGame) { viewPly = null; stopReview(); review = null; }
+  const grew = sameGame && state.moves.length > positions.length - 1;
   positionsKey = key;
-  positions = buildPositions(state.moves);
+  startFen = start;
+  positions = state.positions
+    ? state.positions.map((p, i) => ({
+        fen: p.fen,
+        fog: p.fog,
+        move: i === 0 ? null : { from: p.from, to: p.to, san: p.san, color: p.color, uci: p.uci },
+      }))
+    : buildPositions(state.moves);
   if (grew && viewPly === null) {
     const san = state.moves.at(-1);
     window.playSound(/[+#]/.test(san) ? 'check' : san.includes('x') ? 'capture' : 'move');
@@ -163,10 +204,12 @@ const shownPly = () => (viewPly === null ? positions.length - 1 : viewPly);
 function render() {
   if (!state) return;
   const live = viewPly === null;
-  const shown = live ? chess : new Chess(positions[viewPly].fen);
+  const shown = live ? chess : makeBoard(positions[viewPly].fen, false);
+  const fog = new Set((live ? state.fog : positions[viewPly].fog) || []);
+  const hqPick = state.status === 'setup' && myColor && !state.hq?.mine;
   const lastMove = live ? state.lastMove : positions[viewPly].move;
   const targets = new Set(!live || !selected ? []
-    : myTurn() ? chess.moves({ square: selected, verbose: true }).map((m) => m.to)
+    : myTurn() ? legalTargets(selected)
     : premoveDests(selected));
   const kingInCheck = shown.inCheck()
     ? shown.board().flat().find((p) => p && p.type === 'k' && p.color === shown.turn())?.square
@@ -185,6 +228,8 @@ function render() {
     if (live && sq === selected) el.classList.add('sel');
     if (live && premove && (sq === premove.from || sq === premove.to)) el.classList.add('premove');
     if (sq === kingInCheck) el.classList.add('check');
+    if (fog.has(sq)) el.classList.add('fog');
+    if (state.hq?.mine === sq) el.classList.add('hq-mine');
 
     const piece = shown.get(sq);
     if (piece) {
@@ -194,6 +239,7 @@ function render() {
       el.appendChild(p);
     }
     if (targets.has(sq)) el.classList.add(piece ? 'capture' : 'target');
+    if (hqPick && piece?.type === 'p' && piece.color === myColor) el.classList.add('hq-pick');
 
     // Coordinates on the edge squares.
     if (i % 8 === 0) el.insertAdjacentHTML('beforeend', `<span class="coord rank">${sq[1]}</span>`);
@@ -236,6 +282,10 @@ function renderPanel() {
     text = !myColor ? 'Waiting for players…'
       : state.isPublic ? 'Waiting for an opponent. Your game is listed in the lobby.'
       : 'Waiting for your opponent to join…';
+  } else if (state.status === 'setup') {
+    text = !myColor ? 'Players are choosing their hidden queens…'
+      : state.hq?.mine ? `Your hidden queen is the ${state.hq.mine} pawn. Waiting for your opponent to choose…`
+      : 'Choose your hidden queen: click one of your pawns. It moves like a pawn or a queen, and your opponent sees a pawn until it moves like a queen.';
   } else if (state.status === 'over') {
     const winner = state.result === '1-0' ? 'w' : state.result === '0-1' ? 'b' : null;
     const who = !winner ? 'Draw' : myColor ? (winner === myColor ? 'You won' : 'You lost') : state.players[winner].name + ' wins';
@@ -255,6 +305,7 @@ function renderPanel() {
   const sub = document.createElement('span');
   sub.className = 'status-sub';
   sub.textContent = `${state.rated ? 'Rated' : 'Casual'} ${state.category === 'casual' ? '' : CAT[state.category] + ' '}· ${tc}`
+    + (isVariant() ? ` · ${state.variantName}` : '')
     + (state.archived ? ' · Saved game' : '');
   $('status').append(sub);
 
@@ -382,7 +433,7 @@ function squareAt(x, y) {
 const ownPiece = (sq) => { const p = chess.get(sq); return p && p.color === myColor; };
 const myTurn = () => state && state.turn === myColor;
 const canInteract = () => state && state.status === 'playing' && myColor && viewPly === null && promoEl.hidden;
-const premovesOn = () => !!window.settings.get('premoves');
+const premovesOn = () => !!window.settings.get('premoves') && !isVariant();
 
 // Where a piece could go on an open board. Premoves use this, because the
 // position will have changed by the time the premove is played.
@@ -488,6 +539,13 @@ boardEl.addEventListener('pointerdown', (e) => {
   if (shapes.length) { shapes = []; shapesChanged(); }
   // Looking at an old position: touching the board jumps back to the game.
   if (viewPly !== null && state?.status === 'playing') { goTo(null); return; }
+  // Hidden Queen setup: click one of your pawns.
+  if (state?.status === 'setup' && myColor && !state.hq?.mine) {
+    const sq = squareAt(e.clientX, e.clientY);
+    const p = sq && chess.get(sq);
+    if (p && p.type === 'p' && p.color === myColor) socket.emit('hq:pick', sq);
+    return;
+  }
   if (!canInteract()) return;
   const sq = squareAt(e.clientX, e.clientY);
   if (!sq) return;
@@ -551,6 +609,12 @@ boardEl.addEventListener('pointerup', (e) => {
 boardEl.addEventListener('pointercancel', () => endDrag(null));
 
 function tryMove(from, to) {
+  if (isVariant()) {
+    if (!legalTargets(from).includes(to)) { selected = ownPiece(to) ? to : null; return render(); }
+    const p = chess.get(from);
+    if (p?.type === 'p' && to[1] === (p.color === 'w' ? '8' : '1')) return askPromotion(from, to);
+    return sendMove(from, to);
+  }
   const legal = chess.moves({ square: from, verbose: true }).filter((m) => m.to === to);
   if (!legal.length) {
     selected = ownPiece(to) ? to : null;
@@ -562,7 +626,8 @@ function tryMove(from, to) {
 
 function sendMove(from, to, promotion) {
   // Show the move straight away; the server's reply confirms or corrects it.
-  try {
+  // (Variants wait for the server, which knows what's hidden.)
+  if (!isVariant()) try {
     const m = chess.move({ from, to, promotion });
     state = { ...state, moves: [...state.moves, m.san], lastMove: { from, to }, turn: chess.turn(), inCheck: chess.inCheck() };
     syncPositions();
@@ -687,7 +752,7 @@ async function startReview() {
 $('review-start').onclick = startReview;
 
 function renderReview() {
-  const over = state.status === 'over' && state.moves.length > 0;
+  const over = state.status === 'over' && state.moves.length > 0 && state.reviewable !== false;
   $('review').hidden = !over;
   const ply = shownPly();
   const ev = review?.evals?.[ply];
@@ -697,6 +762,7 @@ function renderReview() {
 
   $('review-start').hidden = !!review;
   $('open-analysis').href = '/analysis#moves=' + encodeURIComponent(state.moves.join(' '))
+    + (isVariant() ? '&fen=' + encodeURIComponent(positions[0].fen) : '')
     + (orientation() === 'b' ? '&flip=1' : '');
   const running = review && !review.done && !review.error;
   $('review-progress').hidden = !running;

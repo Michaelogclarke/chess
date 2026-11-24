@@ -74,6 +74,16 @@
         </fieldset>
 
         <fieldset>
+          <legend>Variant</legend>
+          <div class="chips" id="variant">
+            <button type="button" data-v="standard" class="on">Standard</button>
+            <button type="button" data-v="hiddenqueen">Hidden Queen</button>
+            <button type="button" data-v="fog">Fog of War</button>
+          </div>
+          <p id="variant-help" class="muted small"></p>
+        </fieldset>
+
+        <fieldset>
           <legend>Game type</legend>
           <div class="chips" id="mode">
             <button type="button" data-r="0" class="on">Casual</button>
@@ -128,6 +138,12 @@
     let color = 'random';
     let visibility = 'public';
     let rated = false;
+    let variant = 'standard';
+    const VARIANT_HELP = {
+      standard: 'Normal chess.',
+      hiddenqueen: 'Each player secretly picks a pawn to be their queen. It looks like a pawn to your opponent until it moves like a queen.',
+      fog: "You only see squares your pieces can reach. There's no check: capture the king to win.",
+    };
     let me = { accounts: false, user: null };
 
     const pick = (group, btn) => group.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === btn));
@@ -139,14 +155,17 @@
     onChip('colors', (b) => { color = b.dataset.c; });
     onChip('visibility', (b) => { visibility = b.dataset.v; showVisHelp(); });
     onChip('mode', (b) => { rated = b.dataset.r === '1'; showModeHelp(); });
+    onChip('variant', (b) => { variant = b.dataset.v; showModeHelp(); });
 
     function showModeHelp() {
       const help = document.getElementById('mode-help');
       const ratedBtn = document.querySelector('#mode [data-r="1"]');
-      ratedBtn.disabled = !me.user;
-      if (!me.user && rated) { rated = false; pick(document.getElementById('mode'), document.querySelector('#mode [data-r="0"]')); }
+      document.getElementById('variant-help').textContent = VARIANT_HELP[variant];
+      ratedBtn.disabled = !me.user || variant !== 'standard';
+      if ((!me.user || variant !== 'standard') && rated) { rated = false; pick(document.getElementById('mode'), document.querySelector('#mode [data-r="0"]')); }
       if (!me.accounts) { document.getElementById('mode').closest('fieldset').hidden = true; return; }
-      help.textContent = !me.user ? 'Log in to play rated games.'
+      help.textContent = variant !== 'standard' ? 'Variant games are casual.'
+        : !me.user ? 'Log in to play rated games.'
         : rated ? 'Counts towards your rating. Both players need an account, and it needs a clock.'
         : "Just for fun. Your rating won't change.";
     }
@@ -185,7 +204,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             minutes: minutes.value, increment: increment.value, color,
-            isPublic: visibility === 'public', name: nameEl.value.trim(), rated,
+            isPublic: visibility === 'public', name: nameEl.value.trim(), rated, variant,
           }),
         });
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Server error');
@@ -218,7 +237,7 @@
         const you = g.color === 'w' ? 'Black' : 'White';
         li.innerHTML = `
           <span class="who"><span class="swatch ${g.color}"></span><span class="nm"></span><span class="muted rt"></span></span>
-          <span class="tc"><strong>${fmtTime(g.time)}</strong> <span class="muted">${kind(g.time)}</span>${g.rated ? ' <span class="tag">Rated</span>' : ''}</span>
+          <span class="tc"><strong>${fmtTime(g.time)}</strong> <span class="muted">${kind(g.time)}</span>${g.rated ? ' <span class="tag">Rated</span>' : ''}${g.variant && g.variant !== 'standard' ? ` <span class="tag variant">${g.variantName}</span>` : ''}</span>
           <span class="muted side-label">You play ${you}</span>
           <a class="btn ${mine ? '' : 'primary'}" href="/g/${g.id}">${mine ? 'Your game' : 'Join'}</a>`;
         li.querySelector('.nm').textContent = g.name; // names are user input: never via innerHTML

@@ -61,7 +61,7 @@ function loadText(text) {
 }
 try {
   const hash = new URLSearchParams(location.hash.slice(1));
-  if (hash.get('moves')) loadMoves(hash.get('moves').split(' ').filter(Boolean));
+  if (hash.get('moves')) loadMoves(hash.get('moves').split(' ').filter(Boolean), hash.get('fen') || START);
   else if (hash.get('fen')) loadMoves([], hash.get('fen'));
   if (hash.get('flip') === '1') orientation = 'b';
 } catch {}

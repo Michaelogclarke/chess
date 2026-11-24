@@ -560,3 +560,18 @@ textarea { font: 0.9rem ui-monospace, monospace; color: var(--text); background:
 .gif-pop.top { top: 3%; }
 .gif-pop.bottom { bottom: 3%; }
 .gif-pop img { display: block; width: 100%; }
+
+/* ---------- variants ---------- */
+.sq.fog::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: repeating-linear-gradient(45deg, #3b3a37 0 6px, #34332f 6px 12px);
+  opacity: 0.94;
+}
+.sq.fog .coord { z-index: 3; }
+.sq.hq-pick { cursor: pointer; box-shadow: inset 0 0 0 3px #e0a800; }
+.sq.hq-pick:hover::before { content: ''; position: absolute; inset: 0; background: rgba(224, 168, 0, 0.35); }
+.sq.hq-mine::after { content: '👑'; position: absolute; top: 2%; right: 4%; font-size: 2.2cqw; z-index: 4; }
+.tag.variant { background: #6b4a9b; }
