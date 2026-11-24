@@ -81,6 +81,7 @@ function newGame({ color, minutes, increment, isPublic, name, user, rated }) {
     reason: null,
     lastMove: null,
     drawOffer: null, // color that offered
+    ...freshDrawLimits(),
     rematchOffer: null, // color that offered
     touchedAt: Date.now(),
   };
@@ -89,6 +90,26 @@ function newGame({ color, minutes, increment, isPublic, name, user, rated }) {
   game.seats[creatorColor] = newSeat(token, user, name);
   games.set(id, game);
   return { game, token, color: creatorColor };
+}
+
+// Draw offers: at most DRAW_MAX per player per game, and after one is
+// declined that player waits DRAW_COOLDOWN_PLIES half-moves to offer again.
+const DRAW_MAX = 3;
+const DRAW_COOLDOWN_PLIES = 20; // 10 moves each
+function freshDrawLimits() {
+  return { drawOffersMade: { w: 0, b: 0 }, drawBlockedUntil: { w: 0, b: 0 } };
+}
+function drawStatus(game, c) {
+  const plies = game.chess.history().length;
+  const left = DRAW_MAX - game.drawOffersMade[c];
+  const wait = Math.max(0, game.drawBlockedUntil[c] - plies);
+  return { left, waitMoves: Math.ceil(wait / 2) };
+}
+function declineDraw(game) {
+  const c = game.drawOffer;
+  if (!c) return;
+  game.drawBlockedUntil[c] = game.chess.history().length + DRAW_COOLDOWN_PLIES;
+  game.drawOffer = null;
 }
 
 function newSeat(token, user, name) {
@@ -147,6 +168,7 @@ function publicState(game) {
     clockRunning: clockRunning(game) ? chess.turn() : null,
     isPublic: game.isPublic,
     drawOffer: game.drawOffer,
+    drawLimits: game.drawOffersMade ? { w: drawStatus(game, 'w'), b: drawStatus(game, 'b') } : null,
     rematchOffer: game.rematchOffer,
   };
 }
@@ -441,7 +463,7 @@ io.on('connection', (socket) => {
       game.turnStartedAt = now;
     }
     game.lastMove = { from: move.from, to: move.to };
-    if (game.drawOffer && game.drawOffer !== color) game.drawOffer = null; // moving declines
+    if (game.drawOffer && game.drawOffer !== color) declineDraw(game); // moving declines
     checkGameOver(game);
     scheduleFlag(game);
     broadcast(game);
@@ -455,9 +477,13 @@ io.on('connection', (socket) => {
 
   socket.on('draw', (action) => {
     if (!isPlayer() || game.status !== 'playing') return;
-    if (action === 'offer' && !game.drawOffer) game.drawOffer = color;
-    else if (action === 'accept' && game.drawOffer === other(color)) endGame(game, '1/2-1/2', 'agreement');
-    else if (action === 'decline' && game.drawOffer === other(color)) game.drawOffer = null;
+    if (action === 'offer' && !game.drawOffer) {
+      const d = drawStatus(game, color);
+      if (d.left <= 0 || d.waitMoves > 0) return;
+      game.drawOffer = color;
+      game.drawOffersMade[color]++;
+    } else if (action === 'accept' && game.drawOffer === other(color)) endGame(game, '1/2-1/2', 'agreement');
+    else if (action === 'decline' && game.drawOffer === other(color)) declineDraw(game);
     else if (action === 'cancel' && game.drawOffer === color) game.drawOffer = null;
     broadcast(game);
   });
@@ -476,6 +502,7 @@ io.on('connection', (socket) => {
       game.round++;
       game.result = game.reason = game.lastMove = game.drawOffer = game.rematchOffer = null;
       game.ratingDiff = game.notRated = game.savedId = null;
+      Object.assign(game, freshDrawLimits());
       // Tell every socket its new colour.
       for (const c of ['w', 'b']) {
         for (const sid of game.seats[c].sockets) io.to(sid).emit('recolor', c);

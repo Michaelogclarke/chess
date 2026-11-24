@@ -20,10 +20,15 @@ if (hashToken) {
   try { token = localStorage.getItem(tokenKey); } catch {}
 }
 
-// SVG piece set: "cburnett" by Colin M.L. Burnett (see README for licence).
-const pieceUrl = (color, type) => `/pieces/${color}${type.toUpperCase()}.svg`;
+// Piece images come from the chosen set (see Settings; licences in README).
+const pieceUrl = (color, type) => window.settings.pieceUrl(color, type);
 // Preload so pieces never flash in late.
-for (const c of 'wb') for (const t of 'kqrbnp') new Image().src = pieceUrl(c, t);
+const preloadPieces = () => { for (const c of 'wb') for (const t of 'kqrbnp') new Image().src = pieceUrl(c, t); };
+preloadPieces();
+document.addEventListener('settings-change', (e) => {
+  if (e.detail.key === 'pieces') preloadPieces();
+  if (['pieces', 'blindfold'].includes(e.detail.key)) render();
+});
 const NAME = { w: 'White', b: 'Black' };
 const $ = (id) => document.getElementById(id);
 
@@ -77,18 +82,29 @@ socket.on('state', (s) => {
   chess = new Chess(s.fen);
   if (s.status !== 'over') rematchDismissed = false;
   if (s.moves.length !== prevMoves) selected = null;
+  const wasOver = prevStatus === 'over';
+  prevStatus = s.status;
   syncPositions();
+  if (s.status !== 'playing') premove = null;
+  if (s.status === 'over' && !wasOver && prevMoves > 0) window.playSound('end');
   if (s.status === 'over' && !review) loadCachedReview();
   render();
+  tryPremove();
 });
+let prevStatus = null;
 
 function syncPositions() {
   const key = state.moves.join(' ');
   if (key === positionsKey) return;
   // A new game (rematch) or a correction from the server: drop history view and review.
   if (!key.startsWith(positionsKey)) { viewPly = null; stopReview(); review = null; }
+  const grew = state.moves.length > positions.length - 1 && positions.length > 0 && key.startsWith(positionsKey);
   positionsKey = key;
   positions = buildPositions(state.moves);
+  if (grew && viewPly === null) {
+    const san = state.moves.at(-1);
+    window.playSound(/[+#]/.test(san) ? 'check' : san.includes('x') ? 'capture' : 'move');
+  }
   if (viewPly !== null && viewPly >= positions.length - 1) viewPly = null;
 }
 socket.on('error-msg', (msg) => {
@@ -124,12 +140,14 @@ function render() {
   const live = viewPly === null;
   const shown = live ? chess : new Chess(positions[viewPly].fen);
   const lastMove = live ? state.lastMove : positions[viewPly].move;
-  const targets = new Set(
-    live && selected ? chess.moves({ square: selected, verbose: true }).map((m) => m.to) : []);
+  const targets = new Set(!live || !selected ? []
+    : myTurn() ? chess.moves({ square: selected, verbose: true }).map((m) => m.to)
+    : premoveDests(selected));
   const kingInCheck = shown.inCheck()
     ? shown.board().flat().find((p) => p && p.type === 'k' && p.color === shown.turn())?.square
     : null;
   boardEl.classList.toggle('history', !live);
+  boardEl.classList.toggle('blindfold', !!window.settings.get('blindfold'));
 
   const squares = squaresInOrder();
   boardEl.innerHTML = '';
@@ -140,6 +158,7 @@ function render() {
     el.dataset.sq = sq;
     if (lastMove && (sq === lastMove.from || sq === lastMove.to)) el.classList.add('last');
     if (live && sq === selected) el.classList.add('sel');
+    if (live && premove && (sq === premove.from || sq === premove.to)) el.classList.add('premove');
     if (sq === kingInCheck) el.classList.add('check');
 
     const piece = shown.get(sq);
@@ -160,6 +179,7 @@ function render() {
   renderPanel();
   renderClocks();
   renderReview();
+  renderShapes();
 }
 
 function renderPanel() {
@@ -240,8 +260,18 @@ function renderPanel() {
   // Buttons.
   const playing = state.status === 'playing' && !!myColor;
   $('draw').hidden = $('resign').hidden = !playing;
-  $('draw').textContent = state.drawOffer === myColor ? 'Cancel draw offer' : 'Offer draw';
-  $('draw').disabled = state.drawOffer === opp;
+  const dl = myColor && state.drawLimits?.[myColor];
+  if (state.drawOffer === myColor) {
+    $('draw').textContent = 'Cancel draw offer';
+    $('draw').disabled = false;
+    $('draw').title = '';
+  } else {
+    $('draw').textContent = dl && dl.waitMoves > 0 ? `Offer draw (in ${dl.waitMoves})` : 'Offer draw';
+    $('draw').disabled = state.drawOffer === opp || !dl || dl.left <= 0 || dl.waitMoves > 0;
+    $('draw').title = !dl ? '' : dl.left <= 0 ? 'No draw offers left this game'
+      : dl.waitMoves > 0 ? `Your last offer was declined. You can offer again in ${dl.waitMoves} move${dl.waitMoves === 1 ? '' : 's'}.`
+      : `${dl.left} draw offer${dl.left === 1 ? '' : 's'} left this game`;
+  }
   $('rematch').hidden = !(state.status === 'over' && myColor);
   $('rematch').disabled = state.rematchOffer === myColor;
   $('rematch').textContent = state.rematchOffer === myColor ? 'Rematch requested…' : 'Rematch';
@@ -308,7 +338,7 @@ function renderClocks() {
 }
 setInterval(renderClocks, 100);
 
-// ---------- input: click-to-move and drag-and-drop ----------
+// ---------- input: click-to-move, drag-and-drop, premoves, drawings ----------
 function squareAt(x, y) {
   const r = boardEl.getBoundingClientRect();
   const col = Math.floor(((x - r.left) / r.width) * 8);
@@ -318,25 +348,130 @@ function squareAt(x, y) {
 }
 
 const ownPiece = (sq) => { const p = chess.get(sq); return p && p.color === myColor; };
+const myTurn = () => state && state.turn === myColor;
+const canInteract = () => state && state.status === 'playing' && myColor && viewPly === null && promoEl.hidden;
+const premovesOn = () => !!window.settings.get('premoves');
+
+// Where a piece could go on an open board. Premoves use this, because the
+// position will have changed by the time the premove is played.
+function premoveDests(sq) {
+  const p = chess.get(sq);
+  if (!p) return [];
+  const F = 'abcdefgh', f = F.indexOf(sq[0]), r = Number(sq[1]) - 1, out = [];
+  const add = (df, dr) => {
+    const nf = f + df, nr = r + dr;
+    if (nf >= 0 && nf < 8 && nr >= 0 && nr < 8) out.push(F[nf] + (nr + 1));
+  };
+  const slide = (dirs) => dirs.forEach(([df, dr]) => { for (let k = 1; k < 8; k++) add(df * k, dr * k); });
+  const ORTH = [[1, 0], [-1, 0], [0, 1], [0, -1]], DIAG = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
+  if (p.type === 'n') [[1, 2], [2, 1], [-1, 2], [-2, 1], [1, -2], [2, -1], [-1, -2], [-2, -1]].forEach(([a, b]) => add(a, b));
+  if (p.type === 'b' || p.type === 'q') slide(DIAG);
+  if (p.type === 'r' || p.type === 'q') slide(ORTH);
+  if (p.type === 'k') {
+    [...ORTH, ...DIAG].forEach(([a, b]) => add(a, b));
+    if (f === 4 && r === (p.color === 'w' ? 0 : 7)) { add(2, 0); add(-2, 0); }
+  }
+  if (p.type === 'p') {
+    const d = p.color === 'w' ? 1 : -1;
+    add(0, d); add(-1, d); add(1, d);
+    if (r === (p.color === 'w' ? 1 : 6)) add(0, 2 * d);
+  }
+  return out.filter((t) => !ownPiece(t));
+}
+
+let premove = null; // { from, to }
+function setPremove(from, to) {
+  if (!premoveDests(from).includes(to)) {
+    selected = ownPiece(to) ? to : null;
+    return render();
+  }
+  premove = { from, to };
+  selected = null;
+  render();
+}
+// Called whenever a new position arrives: play the queued premove if it's legal now.
+function tryPremove() {
+  if (!premove || !canInteract() || !myTurn()) return;
+  const pm = premove;
+  premove = null;
+  const legal = chess.moves({ square: pm.from, verbose: true }).find((m) => m.to === pm.to);
+  if (legal) sendMove(pm.from, pm.to, legal.promotion ? 'q' : undefined);
+  else render();
+}
+
+// ---------- drawings: right-click a square for a circle, right-drag for an arrow ----------
+// Shift = red, Alt/Ctrl = blue, Shift+Alt = yellow, otherwise green. Left-click clears.
+let shapes = []; // { from, to?, brush }
+let coachShapes = []; // drawings shared by a coach / coached player
+let drawStart = null;
+const brushFor = (e) => (e.shiftKey && (e.altKey || e.ctrlKey) ? 'yellow' : e.shiftKey ? 'red' : e.altKey || e.ctrlKey ? 'blue' : 'green');
+function toggleShape(from, to, brush) {
+  const same = (s) => s.from === from && (s.to || null) === (to || null);
+  const existing = shapes.find(same);
+  shapes = shapes.filter((s) => !same(s));
+  if (!existing || existing.brush !== brush) shapes.push({ from, to: to || undefined, brush });
+  shapesChanged();
+}
+function shapesChanged() {
+  renderShapes();
+  onShapesChanged?.(shapes);
+}
+let onShapesChanged = null; // set by coaching to share drawings
+
+function sqCenter(sq) {
+  const f = 'abcdefgh'.indexOf(sq[0]), r = Number(sq[1]) - 1;
+  return orientation() === 'w' ? [f + 0.5, 7 - r + 0.5] : [7 - f + 0.5, r + 0.5];
+}
+function arrowSvg(from, to, cls, width = 0.17) {
+  const [x1, y1] = sqCenter(from), [x2, y2] = sqCenter(to);
+  const len = Math.hypot(x2 - x1, y2 - y1), ux = (x2 - x1) / len, uy = (y2 - y1) / len;
+  const head = 0.42, ex = x2 - ux * head, ey = y2 - uy * head, px = -uy, py = ux;
+  return `<g class="${cls}"><line x1="${x1}" y1="${y1}" x2="${ex}" y2="${ey}" stroke-width="${width}" stroke-linecap="round"/>
+    <polygon points="${x2},${y2} ${ex + px * 0.26},${ey + py * 0.26} ${ex - px * 0.26},${ey - py * 0.26}"/></g>`;
+}
+function circleSvg(sq, cls) {
+  const [x, y] = sqCenter(sq);
+  return `<circle class="${cls}" cx="${x}" cy="${y}" r="0.45" fill="none" stroke-width="0.07"/>`;
+}
+function renderShapes() {
+  const svg = $('shapes');
+  if (!svg) return;
+  svg.innerHTML = [...shapes.map((s) => ({ ...s, mine: true })), ...coachShapes].map((s) => {
+    const cls = `shape ${s.brush}${s.mine ? '' : ' shared'}`;
+    return s.to ? arrowSvg(s.from, s.to, cls) : circleSvg(s.from, cls);
+  }).join('');
+}
+
+boardEl.addEventListener('contextmenu', (e) => e.preventDefault());
 
 let drag = null; // { from, ghost, moved, wasSelected }
 
 boardEl.addEventListener('pointerdown', (e) => {
-  // Looking at an old position: touching the board jumps back to the game.
-  if (viewPly !== null && state?.status === 'playing') { goTo(null); return; }
-  if (viewPly !== null || !canMove() || !promoEl.hidden) return;
-  const sq = squareAt(e.clientX, e.clientY);
-  if (!sq) return;
-
-  if (selected && sq !== selected && !ownPiece(sq)) {
-    tryMove(selected, sq);
+  if (e.button === 2) {
+    drawStart = { sq: squareAt(e.clientX, e.clientY), brush: brushFor(e) };
+    if (premove || selected) { premove = null; selected = null; render(); } // right-click cancels a premove
     return;
   }
-  if (!ownPiece(sq)) { selected = null; render(); return; }
+  if (e.button !== 0) return;
+  if (shapes.length) { shapes = []; shapesChanged(); }
+  // Looking at an old position: touching the board jumps back to the game.
+  if (viewPly !== null && state?.status === 'playing') { goTo(null); return; }
+  if (!canInteract()) return;
+  const sq = squareAt(e.clientX, e.clientY);
+  if (!sq) return;
+  const mine = myTurn();
+  if (!mine && !premovesOn()) return;
+
+  if (selected && sq !== selected && !ownPiece(sq)) {
+    if (mine) tryMove(selected, sq); else setPremove(selected, sq);
+    return;
+  }
+  if (!ownPiece(sq)) { selected = null; premove = null; render(); return; }
 
   e.preventDefault();
   const wasSelected = selected === sq;
   selected = sq;
+  if (!mine) premove = null;
   render();
 
   const pieceEl = boardEl.querySelector(`[data-sq="${sq}"] .pc`);
@@ -368,11 +503,19 @@ function endDrag(e) {
   drag = null;
   ghost.remove();
   const to = e && squareAt(e.clientX, e.clientY);
-  if (moved && to && to !== from) return tryMove(from, to);
+  if (moved && to && to !== from) return myTurn() ? tryMove(from, to) : setPremove(from, to);
   if (!moved && wasSelected) selected = null; // clicking a selected piece deselects it
   render();
 }
-boardEl.addEventListener('pointerup', endDrag);
+boardEl.addEventListener('pointerup', (e) => {
+  if (e.button === 2) {
+    const to = squareAt(e.clientX, e.clientY);
+    if (drawStart?.sq && to) toggleShape(drawStart.sq, to === drawStart.sq ? null : to, drawStart.brush);
+    drawStart = null;
+    return;
+  }
+  endDrag(e);
+});
 boardEl.addEventListener('pointercancel', () => endDrag(null));
 
 function tryMove(from, to) {

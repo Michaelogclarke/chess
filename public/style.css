@@ -449,3 +449,46 @@ a.btn:hover { filter: brightness(1.15); }
 .player .diff { font-weight: 700; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
 .status-sub { display: block; font-weight: 400; font-size: 0.85rem; opacity: 0.8; margin-top: 2px; }
 .notice { border-left: 4px solid #e8c547; }
+
+/* ---------- settings ---------- */
+.gear { font-size: 1.25rem; line-height: 1; }
+dialog.settings {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid #4a463f;
+  border-radius: 12px;
+  padding: 0;
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+}
+dialog.settings::backdrop { background: rgba(0, 0, 0, 0.55); }
+.settings-body { padding: 16px 20px 20px; display: grid; gap: 10px; }
+.settings-head { display: flex; justify-content: space-between; align-items: center; }
+.settings-head h2 { margin: 0; font-size: 1.2rem; }
+.settings h3 { margin: 10px 0 0; font-size: 0.95rem; color: var(--muted); font-weight: 600; }
+.piece-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+.piece-opt { display: grid; grid-template-columns: 1fr 1fr; gap: 0; padding: 6px; background: var(--light); border: 2px solid transparent; }
+.piece-opt img { width: 100%; aspect-ratio: 1; }
+.piece-opt span { grid-column: 1 / -1; font-size: 0.75rem; color: #333; text-transform: capitalize; }
+.piece-opt.on, .board-opt.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.board-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.board-opt { width: 64px; height: 64px; background-size: 50% 50% !important; border: 2px solid transparent; position: relative; padding: 0; }
+.board-opt span { position: absolute; bottom: -1px; left: 0; right: 0; font-size: 0.7rem; background: rgba(0,0,0,.55); color: #fff; text-transform: capitalize; border-radius: 0 0 6px 6px; }
+.toggle { display: flex; gap: 12px; align-items: flex-start; padding: 6px 0; cursor: pointer; }
+.toggle input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--accent); }
+.toggle > span { display: grid; gap: 2px; }
+
+/* Blindfold: pieces invisible on your own board (drag ghost still shows). */
+.board.blindfold .pc:not(.ghost) { opacity: 0 !important; }
+
+/* ---------- premoves and drawings ---------- */
+.sq.premove::before { content: ''; position: absolute; inset: 0; background: rgba(40, 110, 200, 0.45); }
+.shape line { stroke: currentColor; }
+.shape polygon { fill: currentColor; }
+.shape circle, circle.shape { stroke: currentColor; }
+.shape { opacity: 0.8; }
+.shape.green { color: #15781b; }
+.shape.red { color: #c22; }
+.shape.blue { color: #0b5fbf; }
+.shape.yellow { color: #e0a800; }
+.shape.shared { opacity: 0.55; }
