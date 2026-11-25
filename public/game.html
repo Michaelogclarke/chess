@@ -5,23 +5,31 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Chess Online</title>
   <link rel="stylesheet" href="/style.css">
+  <script src="/nav.js"></script>
 </head>
 <body>
-  <header class="top">
-    <a href="/" class="brand">♞ Chess Online</a>
-  </header>
+  <nav id="nav" class="site-nav"></nav>
 
   <main class="game">
     <section class="board-col">
       <div class="player" id="top-player">
-        <span class="dot"></span><span class="name"></span><span class="color"></span><span class="clock"></span>
+        <span class="dot"></span><span class="name"></span><span class="rating"></span><span class="diff"></span><span class="color"></span><span class="clock"></span>
       </div>
-      <div class="board-wrap">
-        <div id="board" class="board" aria-label="Chess board"></div>
-        <div id="promo" class="promo" hidden></div>
+      <div class="board-row">
+        <div id="evalbar" class="evalbar" hidden aria-hidden="true">
+          <div class="evalfill"></div><span class="evaltext"></span>
+        </div>
+        <div class="board-wrap">
+          <div id="board" class="board" aria-label="Chess board"></div>
+          <svg id="shapes" class="arrows" viewBox="0 0 8 8" aria-hidden="true"></svg>
+          <svg id="arrows" class="arrows" viewBox="0 0 8 8" aria-hidden="true"></svg>
+          <div id="promo" class="promo" hidden></div>
+          <div id="gif-pop-top" class="gif-pop top" hidden></div>
+          <div id="gif-pop-bottom" class="gif-pop bottom" hidden></div>
+        </div>
       </div>
       <div class="player" id="bottom-player">
-        <span class="dot"></span><span class="name"></span><span class="color"></span><span class="clock"></span>
+        <span class="dot"></span><span class="name"></span><span class="rating"></span><span class="diff"></span><span class="color"></span><span class="clock"></span>
       </div>
     </section>
 
@@ -36,6 +44,12 @@
       </div>
 
       <div id="status" class="card status"></div>
+      <div id="coach-card" class="card" hidden>
+        <strong>Coach link</strong>
+        <p class="muted small">Send this to your coach. They'll watch from your side, and you'll see each other's arrows and circles. Your opponent is told a coach is watching.</p>
+        <div class="copy"><input id="coach-link" readonly><button id="coach-copy">Copy</button></div>
+      </div>
+      <div id="notice" class="card notice" hidden></div>
 
       <div id="offer" class="card offer" hidden>
         <span id="offer-text"></span>
@@ -45,8 +59,31 @@
         </div>
       </div>
 
-      <div class="card">
+      <div id="review" class="card review" hidden>
+        <div class="review-head">
+          <strong>Game review</strong>
+          <button id="review-start" class="primary">Review with Stockfish</button>
+          <a id="open-analysis" class="btn small-btn" href="/analysis">Open in analysis board</a>
+        </div>
+        <div id="review-progress" class="progress" hidden><div class="bar"></div><span class="muted small"></span></div>
+        <table id="review-summary" class="review-summary" hidden>
+          <thead><tr><th></th><th>Accuracy</th><th title="Brilliant moves">!!</th><th title="Inaccuracies">?!</th><th title="Mistakes">?</th><th title="Blunders">??</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div id="graph" class="graph" hidden></div>
+        <p id="comment" class="comment" hidden></p>
+      </div>
+
+      <div class="card moves-card">
         <ol id="moves" class="moves"></ol>
+        <div class="nav">
+          <button id="nav-first" title="First move (Home)" aria-label="First move">⏮</button>
+          <button id="nav-prev" title="Previous move (←)" aria-label="Previous move">◀</button>
+          <span id="nav-pos" class="muted small"></span>
+          <button id="nav-next" title="Next move (→)" aria-label="Next move">▶</button>
+          <button id="nav-last" title="Latest move (End)" aria-label="Latest move">⏭</button>
+        </div>
+        <button id="nav-live" class="live-btn" hidden>Back to the game ▸</button>
       </div>
 
       <div class="btns">
@@ -54,11 +91,26 @@
         <button id="draw">Offer draw</button>
         <button id="resign">Resign</button>
         <button id="rematch" class="primary" hidden>Rematch</button>
+        <button id="gif-btn" hidden>GIF</button>
+        <button id="coach-btn" hidden>Invite a coach</button>
+      </div>
+
+      <div id="gif-panel" class="card gif-panel" hidden>
+        <div class="review-head"><strong>Your GIFs</strong><button id="gif-close" class="small-btn" aria-label="Close">✕</button></div>
+        <div id="gif-grid" class="gif-grid"></div>
+        <p id="gif-empty" class="muted small">No GIFs yet. On GIPHY or Tenor, open a GIF, copy its link (or right-click the image and copy the image address) and paste it below.</p>
+        <form id="gif-add" class="copy">
+          <input id="gif-url" placeholder="Paste a GIPHY or Tenor link" autocomplete="off">
+          <button>Add</button>
+        </form>
+        <p id="gif-err" class="error small" hidden></p>
+        <p class="muted small">Click a GIF to send it. ★ makes it your victory GIF, played automatically when you win.</p>
       </div>
     </aside>
   </main>
 
   <script src="/socket.io/socket.io.js"></script>
+  <script src="/challenge.js"></script>
   <script type="module" src="/app.js"></script>
 </body>
 </html>

@@ -5,15 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Chess Online</title>
   <link rel="stylesheet" href="/style.css">
+  <script src="/nav.js"></script>
 </head>
 <body>
+  <nav id="nav" class="site-nav"></nav>
   <main class="lobby">
     <header class="lobby-head">
       <div>
         <h1>♞ Chess Online</h1>
         <p class="muted">Join an open game, post your own, or send a private link to a friend.</p>
       </div>
-      <label class="name-field">
+      <p id="signed-in" class="signed-in" hidden></p>
+      <label class="name-field" id="name-field">
         Your name
         <span class="copy">
           <input id="name" maxlength="20" autocomplete="nickname" spellcheck="false">
@@ -23,6 +26,16 @@
     </header>
 
     <div class="lobby-grid">
+      <div class="lobby-left">
+      <section class="card online" id="online-card">
+        <div class="section-head">
+          <h2>Online now</h2>
+          <span id="online-count" class="muted"></span>
+        </div>
+        <ul id="online-list" class="online-list"></ul>
+        <p id="online-empty" class="muted empty">Nobody else is online right now.</p>
+      </section>
+
       <section class="card open-games">
         <div class="section-head">
           <h2>Open games</h2>
@@ -31,6 +44,7 @@
         <ul id="open-list" class="open-list"></ul>
         <p id="open-empty" class="muted empty">No open games right now. Create one and it will show up here for others to join.</p>
       </section>
+      </div>
 
       <form id="create" class="card create">
         <h2>Create a game</h2>
@@ -60,6 +74,25 @@
         </fieldset>
 
         <fieldset>
+          <legend>Variant</legend>
+          <div class="chips" id="variant">
+            <button type="button" data-v="standard" class="on">Standard</button>
+            <button type="button" data-v="hiddenqueen">Hidden Queen</button>
+            <button type="button" data-v="fog">Fog of War</button>
+          </div>
+          <p id="variant-help" class="muted small"></p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Game type</legend>
+          <div class="chips" id="mode">
+            <button type="button" data-r="0" class="on">Casual</button>
+            <button type="button" data-r="1">Rated</button>
+          </div>
+          <p id="mode-help" class="muted small"></p>
+        </fieldset>
+
+        <fieldset>
           <legend>Who can join</legend>
           <div class="chips" id="visibility">
             <button type="button" data-v="public" class="on">Public</button>
@@ -75,6 +108,7 @@
   </main>
 
   <script src="/socket.io/socket.io.js"></script>
+  <script src="/challenge.js"></script>
   <script>
     // ---------- nickname ----------
     const ADJ = ['Swift', 'Clever', 'Bold', 'Quiet', 'Lucky', 'Brave', 'Sly', 'Calm', 'Wild', 'Royal', 'Sneaky', 'Mighty'];
@@ -103,6 +137,14 @@
     const increment = document.getElementById('increment');
     let color = 'random';
     let visibility = 'public';
+    let rated = false;
+    let variant = 'standard';
+    const VARIANT_HELP = {
+      standard: 'Normal chess.',
+      hiddenqueen: 'Each player secretly picks a pawn to be their queen. It looks like a pawn to your opponent until it moves like a queen.',
+      fog: "You only see squares your pieces can reach. There's no check: capture the king to win.",
+    };
+    let me = { accounts: false, user: null };
 
     const pick = (group, btn) => group.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === btn));
     const onChip = (id, fn) => document.getElementById(id).addEventListener('click', (e) => {
@@ -112,6 +154,37 @@
     onChip('presets', (b) => { minutes.value = b.dataset.m; increment.value = b.dataset.i; });
     onChip('colors', (b) => { color = b.dataset.c; });
     onChip('visibility', (b) => { visibility = b.dataset.v; showVisHelp(); });
+    onChip('mode', (b) => { rated = b.dataset.r === '1'; showModeHelp(); });
+    onChip('variant', (b) => { variant = b.dataset.v; showModeHelp(); });
+
+    function showModeHelp() {
+      const help = document.getElementById('mode-help');
+      const ratedBtn = document.querySelector('#mode [data-r="1"]');
+      document.getElementById('variant-help').textContent = VARIANT_HELP[variant];
+      ratedBtn.disabled = !me.user || variant !== 'standard';
+      if ((!me.user || variant !== 'standard') && rated) { rated = false; pick(document.getElementById('mode'), document.querySelector('#mode [data-r="0"]')); }
+      if (!me.accounts) { document.getElementById('mode').closest('fieldset').hidden = true; return; }
+      help.textContent = variant !== 'standard' ? 'Variant games are casual.'
+        : !me.user ? 'Log in to play rated games.'
+        : rated ? 'Counts towards your rating. Both players need an account, and it needs a clock.'
+        : "Just for fun. Your rating won't change.";
+    }
+
+    window.mePromise.then((m) => {
+      me = m;
+      if (me.user) {
+        // Logged in: your username is your name.
+        document.getElementById('name-field').hidden = true;
+        const el = document.getElementById('signed-in');
+        el.hidden = false;
+        el.textContent = 'Playing as ';
+        const b = document.createElement('strong');
+        b.textContent = me.user.username;
+        el.append(b);
+      }
+      showModeHelp();
+      if (lastLobby) renderOpen(lastLobby);
+    });
     [minutes, increment].forEach((el) => el.addEventListener('input', () =>
       document.querySelectorAll('#presets button').forEach((b) =>
         b.classList.toggle('on', b.dataset.m === minutes.value && b.dataset.i === increment.value))));
@@ -131,10 +204,10 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             minutes: minutes.value, increment: increment.value, color,
-            isPublic: visibility === 'public', name: nameEl.value.trim(),
+            isPublic: visibility === 'public', name: nameEl.value.trim(), rated, variant,
           }),
         });
-        if (!res.ok) throw new Error('Server error');
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Server error');
         const { id, token } = await res.json();
         store.set('chess-token-' + id, token);
         location.href = '/g/' + id + '#t=' + token;
@@ -153,27 +226,58 @@
       return est < 180 ? 'Bullet' : est < 480 ? 'Blitz' : est < 1500 ? 'Rapid' : 'Classical';
     };
 
-    function renderOpen({ games, playing }) {
+    let lastLobby = null;
+    function renderOpen(data) {
+      lastLobby = data;
+      const { games, playing } = data;
       listEl.innerHTML = '';
       for (const g of games) {
         const mine = !!store.get('chess-token-' + g.id);
         const li = document.createElement('li');
         const you = g.color === 'w' ? 'Black' : 'White';
         li.innerHTML = `
-          <span class="who"><span class="swatch ${g.color}"></span><span class="nm"></span></span>
-          <span class="tc"><strong>${fmtTime(g.time)}</strong> <span class="muted">${kind(g.time)}</span></span>
+          <span class="who"><span class="swatch ${g.color}"></span><span class="nm"></span><span class="muted rt"></span></span>
+          <span class="tc"><strong>${fmtTime(g.time)}</strong> <span class="muted">${kind(g.time)}</span>${g.rated ? ' <span class="tag">Rated</span>' : ''}${g.variant && g.variant !== 'standard' ? ` <span class="tag variant">${g.variantName}</span>` : ''}</span>
           <span class="muted side-label">You play ${you}</span>
           <a class="btn ${mine ? '' : 'primary'}" href="/g/${g.id}">${mine ? 'Your game' : 'Join'}</a>`;
         li.querySelector('.nm').textContent = g.name; // names are user input: never via innerHTML
+        li.querySelector('.rt').textContent = g.rating ? ' ' + fmtRating(g.rating) : '';
+        if (g.rated && !me.user && !mine) {
+          const a = li.querySelector('a.btn');
+          a.textContent = 'Log in to join';
+          a.href = '/login?next=' + encodeURIComponent('/g/' + g.id);
+        }
         if (mine) li.querySelector('.side-label').textContent = 'Waiting for opponent…';
         listEl.appendChild(li);
       }
       document.getElementById('open-empty').hidden = games.length > 0;
       document.getElementById('online').textContent = playing
         ? `${playing} game${playing === 1 ? '' : 's'} in progress` : '';
+      renderOnlinePlayers(data.online || []);
     }
 
+    // ---------- online players + challenges ----------
+    function renderOnlinePlayers(online) {
+      const list = document.getElementById('online-list');
+      const others = online.filter((p) => p.key !== window.myPresenceKey);
+      list.innerHTML = '';
+      for (const p of others) {
+        const li = document.createElement('li');
+        li.innerHTML = `<span class="dot on"></span><span class="nm"></span><span class="muted rt"></span>
+          <span class="muted busy"></span><button type="button" class="small-btn">Challenge</button>`;
+        li.querySelector('.nm').textContent = p.name;
+        li.querySelector('.rt').textContent = p.rating ? fmtRating(p.rating) : '';
+        li.querySelector('.busy').textContent = p.busy ? 'in a game' : '';
+        li.querySelector('button').onclick = () => window.challengePlayer(p);
+        list.appendChild(li);
+      }
+      document.getElementById('online-empty').hidden = others.length > 0;
+      document.getElementById('online-count').textContent = others.length ? `${others.length}` : '';
+    }
+    document.addEventListener('presence-ready', () => lastLobby && renderOpen(lastLobby));
+
     const socket = io();
+    window.initChallenges(socket);
     socket.on('connect', () => socket.emit('lobby'));
     socket.on('lobby', renderOpen);
   </script>

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Player · Chess Online</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/nav.js"></script>
+</head>
+<body>
+  <nav id="nav" class="site-nav"></nav>
+  <main class="page">
+    <h1 id="name"></h1>
+    <p id="joined" class="muted"></p>
+    <p id="err" class="error" hidden></p>
+
+    <div id="ratings" class="rating-cards"></div>
+
+    <h2>Recent games</h2>
+    <div class="card">
+      <table class="table" id="games">
+        <thead><tr><th>Result</th><th>Opponent</th><th class="hide-sm">Type</th><th class="num">Rating</th><th class="num hide-sm">Moves</th><th class="num">Date</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="empty" class="muted empty" hidden>No games yet.</p>
+    </div>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const username = decodeURIComponent(location.pathname.split('/').pop());
+    const CAT = { bullet: 'Bullet', blitz: 'Blitz', rapid: 'Rapid', classical: 'Classical', casual: 'Casual' };
+    const fmtTime = (t) => (t ? `${t.initial / 60000}+${t.increment / 1000}` : '∞');
+
+    (async () => {
+      try {
+        const res = await fetch('/api/users/' + encodeURIComponent(username));
+        const p = await res.json();
+        if (!res.ok) throw new Error(p.error);
+        document.title = p.username + ' · Chess Online';
+        $('name').textContent = p.username;
+        $('joined').textContent = 'Joined ' + new Date(p.joined).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+
+        for (const r of p.ratings) {
+          const card = document.createElement('a');
+          card.className = 'card rating-card';
+          card.href = '/leaderboard?category=' + r.category;
+          card.innerHTML = `<span class="muted"></span><strong></strong><span class="muted small"></span>`;
+          const [label, value, sub] = card.children;
+          label.textContent = CAT[r.category];
+          value.textContent = r.games ? fmtRating(r) : '—';
+          sub.textContent = r.games ? `${r.games} game${r.games === 1 ? '' : 's'} · ${r.wins}W ${r.draws}D ${r.losses}L` : 'No rated games';
+          $('ratings').appendChild(card);
+        }
+
+        const tbody = $('games').querySelector('tbody');
+        for (const g of p.games) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td><span class="outcome"></span></td><td><span class="swatch"></span> <span class="opp"></span></td>
+            <td class="hide-sm muted"></td><td class="num"></td><td class="num hide-sm"></td><td class="num muted"></td>
+            <td><a class="btn small-btn">Review</a></td>`;
+          const td = tr.querySelectorAll('td');
+          const out = td[0].querySelector('.outcome');
+          out.textContent = { win: 'Won', loss: 'Lost', draw: 'Draw' }[g.outcome];
+          out.classList.add(g.outcome);
+          out.title = g.reason;
+          // Swatch shows the colour this player had.
+          td[1].querySelector('.swatch').classList.add(g.color);
+          td[1].querySelector('.opp').textContent = g.opponent + (g.opponentRating ? ` (${g.opponentRating})` : '');
+          td[2].textContent = `${CAT[g.category]} ${fmtTime(g.time)}${g.rated ? ' · Rated' : ''}`;
+          if (g.diff !== null) {
+            td[3].textContent = (g.diff > 0 ? '+' : '') + g.diff;
+            td[3].className = 'num ' + (g.diff > 0 ? 'up' : g.diff < 0 ? 'down' : '');
+          } else {
+            td[3].textContent = '–';
+            td[3].className = 'num muted';
+          }
+          td[4].textContent = g.moves;
+          td[5].textContent = new Date(g.endedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+          td[6].querySelector('a').href = '/g/' + encodeURIComponent(g.id);
+          tbody.appendChild(tr);
+        }
+        $('empty').hidden = p.games.length > 0;
+      } catch (err) {
+        $('err').textContent = err.message || 'Could not load this player.';
+        $('err').hidden = false;
+      }
+    })();
+  </script>
+</body>
+</html>
