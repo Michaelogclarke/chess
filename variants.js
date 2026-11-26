@@ -211,17 +211,16 @@ function newBoard(variant) {
 }
 
 // ---------- Hidden Queen ----------
-// Each player secretly chooses a pawn to be their queen (the real queen is
-// removed). It looks like a pawn to the opponent until it makes a move a
-// pawn couldn't, or reaches the last rank.
+// Each player keeps their normal queen and secretly chooses one pawn to be a
+// second, hidden queen. It looks like a pawn to the opponent until it makes
+// a move a pawn couldn't, or reaches the last rank.
 function freshHiddenQueen() {
   return { w: { square: null, revealed: false, captured: false }, b: { square: null, revealed: false, captured: false } };
 }
 
 function applyHiddenQueens(game) {
   for (const c of ['w', 'b']) {
-    const q = game.chess.board().flat().find((p) => p && p.type === 'q' && p.color === c);
-    if (q) game.chess.remove(q.square);
+    // The normal queen stays on the board; the chosen pawn becomes a second, secret queen.
     game.chess.remove(game.hq[c].square);
     game.chess.put({ type: 'q', color: c }, game.hq[c].square);
   }

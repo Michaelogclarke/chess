@@ -14,7 +14,7 @@ Play chess online in the browser. Join an open game from the lobby, post your ow
 - **Analysis board:** move pieces freely with Stockfish's top 3 lines, eval bar and arrows updating live. Load any PGN or FEN, or open a finished game from its review panel.
 - **Play vs Stockfish** at 8 levels, with take-backs.
 - **Variants** (casual only):
-  - *Hidden Queen:* each player secretly picks a pawn to be their queen. It looks like a pawn to the opponent until it moves like a queen.
+  - *Hidden Queen:* each player keeps their normal queen and secretly picks one pawn to be a second, hidden queen. It looks like a pawn to the opponent until it moves like a queen.
   - *Fog of War:* you only see squares your pieces can reach. There's no check; capture the king to win.
 - **Challenges:** the lobby lists who's online. Challenge someone directly with a time control, colour, variant and rated/casual; they get an Accept/Decline pop-up on any page.
 - **Premoves:** queue a move while your opponent thinks. It plays instantly if it's still legal.
