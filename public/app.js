@@ -297,7 +297,7 @@ function renderPanel() {
   } else if (state.status === 'setup') {
     text = !myColor ? 'Players are choosing their hidden queens…'
       : state.hq?.mine ? `Your hidden queen is the ${state.hq.mine} pawn. Waiting for your opponent to choose…`
-      : 'Choose your hidden queen: click one of your pawns. It moves like a pawn or a queen, and your opponent sees a pawn until it moves like a queen.';
+      : 'Choose your hidden queen: click one of your pawns. You keep your normal queen too. The hidden one moves like a pawn or a queen, and your opponent sees a pawn until it moves like a queen.';
   } else if (state.status === 'over') {
     const winner = state.result === '1-0' ? 'w' : state.result === '0-1' ? 'b' : null;
     const who = !winner ? 'Draw' : myColor ? (winner === myColor ? 'You won' : 'You lost') : state.players[winner].name + ' wins';
