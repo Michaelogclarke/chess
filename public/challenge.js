@@ -129,6 +129,7 @@
     dlg.showModal();
   }
   window.challengePlayer = challengePlayer;
+  window.showToast = (text, ttl = 5000) => toast(null, text, [], ttl);
 
   window.initChallenges = function (s) {
     socket = s;

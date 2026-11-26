@@ -260,13 +260,14 @@ function hiddenQueenAfterMove(game, m) {
   return shownSan;
 }
 
-// Replace each unrevealed hidden queen the viewer shouldn't see with a pawn.
-function maskHiddenQueens(fen, hqState, viewer) {
+// Draw each unrevealed hidden queen as a pawn. Its owner sees a pawn too
+// (marked with a crown by the client); the server still knows it's a queen.
+function maskHiddenQueens(fen, hqState) {
   const cells = expand(fen);
   let changed = false;
   for (const c of ['w', 'b']) {
     const hq = hqState[c];
-    if (c === viewer || !hq.square || hq.revealed || hq.captured) continue;
+    if (!hq.square || hq.revealed || hq.captured) continue;
     const i = idx(hq.square);
     if (cells[i] && cells[i].toLowerCase() === 'q') { cells[i] = c === 'w' ? 'P' : 'p'; changed = true; }
   }
@@ -306,8 +307,9 @@ function viewFor(game, viewer) {
   const positions = game.snaps.map((s, i) => {
     let fen = s.fen, san = s.san, from = s.from, to = s.to;
     if (!over && game.variant === 'hiddenqueen') {
-      fen = maskHiddenQueens(s.fen, s.hq, viewer);
-      if (s.color !== viewer) san = s.shownSan;
+      fen = maskHiddenQueens(s.fen, s.hq);
+      // Everyone sees hidden-queen moves written as pawn moves; the owner gets a crown marker.
+      if (s.shownSan !== s.san) san = s.shownSan + (s.color === viewer ? ' ♛' : '');
     }
     let fog = null;
     if (!over && game.variant === 'fog') {
