@@ -132,10 +132,21 @@ socket.on('state', (s) => {
   chess = makeBoard(s.fen, s.inCheck);
   if (s.status !== 'over') rematchDismissed = false;
   if (s.moves.length !== prevMoves) selected = null;
+  if (s.variant === 'hiddenqueen' && s.status === 'playing' && prevRevealed) {
+    for (const c of ['w', 'b']) {
+      if (s.hq?.revealed?.[c] && !prevRevealed[c]) {
+        const who = c === myColor ? 'Your' : `${s.players[c]?.name || NAME[c]}'s`;
+        window.showToast?.(`♛ ${who} hidden queen has been revealed on ${s.lastMove?.to || 'the board'}!`, 5000);
+        window.playSound('notify');
+      }
+    }
+  }
+  prevRevealed = s.hq?.revealed ? { ...s.hq.revealed } : null;
   const wasCoached = prevCoached;
   prevCoached = !!(myColor && s.players?.[myColor]?.coached);
   if (prevCoached && !wasCoached) setTimeout(shareShapes, 0);
   if (!prevCoached && !coachOf) coachShapes = [];
+  if (prevStatus === 'waiting' && (s.status === 'playing' || s.status === 'setup') && myColor) window.playSound('notify');
   const wasOver = prevStatus === 'over';
   prevStatus = s.status;
   syncPositions();
@@ -148,6 +159,7 @@ socket.on('state', (s) => {
 });
 let prevStatus = null;
 let prevCoached = false;
+let prevRevealed = null;
 
 let startFen = null; // variants send their own start position
 function syncPositions() {
@@ -308,6 +320,12 @@ function renderPanel() {
     + (isVariant() ? ` · ${state.variantName}` : '')
     + (state.archived ? ' · Saved game' : '');
   $('status').append(sub);
+  if (state.variant === 'hiddenqueen' && state.status === 'playing' && state.hq?.mine && !state.hq.revealed?.[myColor]) {
+    const hint = document.createElement('span');
+    hint.className = 'status-sub';
+    hint.textContent = `♛ Your hidden queen is the pawn on ${state.hq.mine}. It moves like a queen; your opponent sees a pawn.`;
+    $('status').append(hint);
+  }
 
   // Notices: why you're spectating, or why a rated game didn't count.
   const oppColor = myColor === 'w' ? 'b' : 'w';
@@ -612,7 +630,8 @@ function tryMove(from, to) {
   if (isVariant()) {
     if (!legalTargets(from).includes(to)) { selected = ownPiece(to) ? to : null; return render(); }
     const p = chess.get(from);
-    if (p?.type === 'p' && to[1] === (p.color === 'w' ? '8' : '1')) return askPromotion(from, to);
+    const isHiddenQueen = from === state.hq?.mine; // already a queen: no promotion
+    if (!isHiddenQueen && p?.type === 'p' && to[1] === (p.color === 'w' ? '8' : '1')) return askPromotion(from, to);
     return sendMove(from, to);
   }
   const legal = chess.moves({ square: from, verbose: true }).filter((m) => m.to === to);

@@ -45,26 +45,68 @@
     BOARDS,
   };
 
-  // Tiny synthesized sounds, so there are no audio files to license.
-  let audio = null;
+  // Sounds are synthesized (no audio files to license): a short wooden
+  // "tock" for moves, a double clack for captures, soft marimba notes for
+  // check, game end and notifications.
+  let audio = null, noise = null;
+  function ctx() {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state === 'suspended') audio.resume();
+    if (!noise) {
+      noise = audio.createBuffer(1, audio.sampleRate * 0.05, audio.sampleRate);
+      const d = noise.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 3);
+    }
+    return audio;
+  }
+  // One wooden knock: a filtered noise click plus a short low "body" thump.
+  function knock(at, { pitch = 1, vol = 0.5 } = {}) {
+    const a = audio, out = a.createGain();
+    out.gain.value = vol;
+    out.connect(a.destination);
+    const src = a.createBufferSource();
+    src.buffer = noise;
+    const bp1 = a.createBiquadFilter(); bp1.type = 'bandpass'; bp1.frequency.value = 1150 * pitch; bp1.Q.value = 5;
+    const bp2 = a.createBiquadFilter(); bp2.type = 'bandpass'; bp2.frequency.value = 2600 * pitch; bp2.Q.value = 7;
+    const g1 = a.createGain(); g1.gain.value = 1.4;
+    const g2 = a.createGain(); g2.gain.value = 0.5;
+    src.connect(bp1).connect(g1).connect(out);
+    src.connect(bp2).connect(g2).connect(out);
+    src.start(at);
+    const body = a.createOscillator(), bg = a.createGain();
+    body.type = 'sine';
+    body.frequency.setValueAtTime(210 * pitch, at);
+    body.frequency.exponentialRampToValueAtTime(120 * pitch, at + 0.05);
+    bg.gain.setValueAtTime(0.0001, at);
+    bg.gain.exponentialRampToValueAtTime(0.35, at + 0.003);
+    bg.gain.exponentialRampToValueAtTime(0.0001, at + 0.07);
+    body.connect(bg).connect(out);
+    body.start(at); body.stop(at + 0.08);
+  }
+  // A soft mallet note (fundamental plus a quiet overtone, quick decay).
+  function mallet(at, freq, { vol = 0.18, dur = 0.5 } = {}) {
+    const a = audio;
+    for (const [mult, v] of [[1, 1], [4, 0.12]]) {
+      const o = a.createOscillator(), g = a.createGain();
+      o.type = 'sine';
+      o.frequency.value = freq * mult;
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(vol * v, at + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + dur / mult);
+      o.connect(g).connect(a.destination);
+      o.start(at); o.stop(at + dur);
+    }
+  }
   window.playSound = (kind) => {
     if (!settings.sounds) return;
     try {
-      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
-      const t = audio.currentTime;
-      const tone = (freq, start, dur, vol, type = 'sine') => {
-        const o = audio.createOscillator(), g = audio.createGain();
-        o.type = type; o.frequency.value = freq;
-        g.gain.setValueAtTime(vol, t + start);
-        g.gain.exponentialRampToValueAtTime(0.0001, t + start + dur);
-        o.connect(g).connect(audio.destination);
-        o.start(t + start); o.stop(t + start + dur);
-      };
-      if (kind === 'move') tone(520, 0, 0.08, 0.15, 'triangle');
-      else if (kind === 'capture') { tone(300, 0, 0.1, 0.2, 'square'); tone(200, 0.03, 0.1, 0.1, 'triangle'); }
-      else if (kind === 'check') { tone(880, 0, 0.12, 0.12); tone(660, 0.1, 0.12, 0.12); }
-      else if (kind === 'end') { tone(523, 0, 0.18, 0.15); tone(659, 0.15, 0.18, 0.15); tone(784, 0.3, 0.3, 0.15); }
-      else if (kind === 'notify') { tone(740, 0, 0.1, 0.12); tone(988, 0.1, 0.15, 0.12); }
+      const a = ctx(), t = a.currentTime + 0.005;
+      const vary = 0.96 + Math.random() * 0.08; // tiny variation so repeats sound natural
+      if (kind === 'move') knock(t, { pitch: vary, vol: 0.85 });
+      else if (kind === 'capture') { knock(t, { pitch: 0.9 * vary, vol: 1.0 }); knock(t + 0.045, { pitch: 1.05 * vary, vol: 0.6 }); }
+      else if (kind === 'check') { knock(t, { pitch: vary, vol: 0.85 }); mallet(t + 0.04, 880, { vol: 0.1, dur: 0.35 }); }
+      else if (kind === 'end') { mallet(t, 523.25, { dur: 0.7 }); mallet(t + 0.16, 659.25, { dur: 0.7 }); mallet(t + 0.32, 783.99, { dur: 0.9 }); }
+      else if (kind === 'notify') { mallet(t, 659.25, { vol: 0.14, dur: 0.4 }); mallet(t + 0.12, 987.77, { vol: 0.14, dur: 0.55 }); }
     } catch {}
   };
 

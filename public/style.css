@@ -573,5 +573,17 @@ textarea { font: 0.9rem ui-monospace, monospace; color: var(--text); background:
 .sq.fog .coord { z-index: 3; }
 .sq.hq-pick { cursor: pointer; box-shadow: inset 0 0 0 3px #e0a800; }
 .sq.hq-pick:hover::before { content: ''; position: absolute; inset: 0; background: rgba(224, 168, 0, 0.35); }
-.sq.hq-mine::after { content: '👑'; position: absolute; top: 2%; right: 4%; font-size: 2.2cqw; z-index: 4; }
+.sq.hq-mine { box-shadow: inset 0 0 0 3px #e0a800, inset 0 0 18px rgba(255, 200, 40, 0.75); }
+.sq.hq-mine::after {
+  content: '♛';
+  position: absolute;
+  top: 1%;
+  right: 3%;
+  z-index: 4;
+  font-size: 3.4cqw;
+  line-height: 1;
+  color: #ffcf33;
+  text-shadow: 0 0 2px #000, 0 0 4px #000;
+  pointer-events: none;
+}
 .tag.variant { background: #6b4a9b; }
